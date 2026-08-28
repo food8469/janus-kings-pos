@@ -1,0 +1,20 @@
+{
+  "name": "janus-kings-pos",
+  "version": "1.0.0",
+  "description": "野烏金 POS 系統",
+  "main": "pos-api-server.js",
+  "scripts": {
+    "start": "node pos-api-server.js",
+    "dev": "nodemon pos-api-server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "googleapis": "^118.0.0",
+    "dotenv": "^16.3.1",
+    "xlsx": "^0.18.5"
+  },
+  "engines": {
+    "node": "18"
+  }
+}
