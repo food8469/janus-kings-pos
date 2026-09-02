@@ -3,503 +3,175 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>野烏金 POS 系統 - 測試頁面 v2</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            padding: 20px;
-            color: #333;
-        }
-
-        .container {
-            max-width: 600px;
-            margin: 0 auto;
-        }
-
-        .header {
-            background: white;
-            padding: 20px;
-            border-radius: 12px 12px 0 0;
-            text-align: center;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }
-
-        .header h1 {
-            color: #667eea;
-            margin-bottom: 5px;
-        }
-
-        .header p {
-            color: #666;
-            font-size: 14px;
-        }
-
-        .tabs {
-            display: flex;
-            background: white;
-            border-bottom: 2px solid #e0e0e0;
-        }
-
-        .tab {
-            flex: 1;
-            padding: 12px;
-            text-align: center;
-            cursor: pointer;
-            border: none;
-            background: none;
-            font-size: 14px;
-            font-weight: 500;
-            color: #999;
-            border-bottom: 3px solid transparent;
-            transition: all 0.3s;
-        }
-
-        .tab.active {
-            color: #667eea;
-            border-bottom-color: #667eea;
-        }
-
-        .tab-content {
-            display: none;
-            background: white;
-            padding: 20px;
-            border-radius: 0 0 12px 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }
-
-        .tab-content.active {
-            display: block;
-        }
-
-        .product-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-            gap: 10px;
-            margin-bottom: 20px;
-            max-height: 300px;
-            overflow-y: auto;
-            padding: 10px;
-            background: #f9f9f9;
-            border-radius: 8px;
-        }
-
-        .product-card {
-            background: white;
-            border: 2px solid #ddd;
-            border-radius: 8px;
-            padding: 12px;
-            cursor: pointer;
-            transition: all 0.3s;
-            text-align: center;
-        }
-
-        .product-card:hover {
-            border-color: #667eea;
-            background: #f0f4ff;
-            transform: translateY(-2px);
-        }
-
-        .product-card.selected {
-            border-color: #667eea;
-            background: #e8f0ff;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-
-        .product-name {
-            font-size: 13px;
-            font-weight: 600;
-            color: #333;
-            margin-bottom: 5px;
-            line-height: 1.3;
-        }
-
-        .product-price {
-            font-size: 14px;
-            color: #667eea;
-            font-weight: bold;
-        }
-
-        .form-group {
-            margin-bottom: 15px;
-        }
-
-        label {
-            display: block;
-            margin-bottom: 6px;
-            font-weight: 500;
-            color: #333;
-            font-size: 14px;
-        }
-
-        input, select {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            font-size: 14px;
-            font-family: inherit;
-        }
-
-        input:focus, select:focus {
-            outline: none;
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-
-        .form-row {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 10px;
-        }
-
-        button {
-            width: 100%;
-            padding: 12px;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            border-radius: 6px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s;
-        }
-
-        button:active {
-            transform: scale(0.98);
-        }
-
-        .result {
-            margin-top: 15px;
-            padding: 12px;
-            background: #f5f5f5;
-            border-radius: 6px;
-            border-left: 4px solid #667eea;
-            display: none;
-        }
-
-        .result.show {
-            display: block;
-        }
-
-        .result.success {
-            border-left-color: #4caf50;
-            background: #f1f8f4;
-        }
-
-        .result.error {
-            border-left-color: #f44336;
-            background: #fef5f5;
-        }
-
-        .result-title {
-            font-weight: 600;
-            margin-bottom: 8px;
-            font-size: 15px;
-        }
-
-        .result-body {
-            font-size: 13px;
-            color: #666;
-            line-height: 1.5;
-        }
-
-        .loading {
-            text-align: center;
-            padding: 20px;
-            color: #999;
-        }
-
-        .spinner {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid #f3f3f3;
-            border-top: 3px solid #667eea;
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-    </style>
+    <title>野烏金 POS 系統</title>
+    <!-- 引入 Tailwind CSS 快速排版 -->
+    <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body>
-    <div class="container">
-        <div class="header">
-            <h1>🐟 野烏金 POS</h1>
-            <p>系統測試頁面 v2</p>
-        </div>
+<body class="bg-gray-100 font-sans">
 
-        <div class="tabs">
-            <button class="tab active" onclick="switchTab(0)">模式 B<br>商品銷售</button>
-            <button class="tab" onclick="switchTab(1)">模式 C<br>金額推薦</button>
-            <button class="tab" onclick="switchTab(2)">檢查<br>庫存</button>
-        </div>
-
-        <!-- 模式 B：商品銷售 -->
-        <div class="tab-content active">
-            <label style="margin-bottom: 10px;">📦 選擇商品（點擊選中）</label>
-            <div class="product-grid" id="productGrid">
-                <div class="loading"><div class="spinner"></div> 載入中...</div>
-            </div>
-
-            <div class="form-group">
-                <label>購買數量</label>
-                <input type="number" id="quantity" value="1" min="1" />
-            </div>
-
-            <div class="form-row">
-                <div class="form-group">
-                    <label>門市</label>
-                    <select id="store">
-                        <option value="高雄">高雄</option>
-                        <option value="台中">台中</option>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label>銷售人員</label>
-                    <select id="staff">
-                        <option value="">-- 選擇 --</option>
-                        <option value="陳淑貞">陳淑貞</option>
-                        <option value="黃亭菱">黃亭菱</option>
-                        <option value="林岱蓉">林岱蓉</option>
-                        <option value="蔡秀梅">蔡秀梅</option>
-                    </select>
+    <div class="flex h-screen overflow-hidden">
+        
+        <!-- 左側：購物車與結帳區 (佔 40%) -->
+        <div class="w-2/5 bg-white border-r border-gray-200 flex flex-col justify-between p-4 shadow-md">
+            <div>
+                <h1 class="text-2xl font-bold text-gray-800 mb-2">🐟 野烏金 POS</h1>
+                <p class="text-sm text-gray-500 mb-4">目前結帳清單</p>
+                
+                <!-- 購物車清單區 -->
+                <div id="cart-items" class="overflow-y-auto max-h-[55vh] space-y-3 pr-1">
+                    <p class="text-gray-400 text-center py-10">尚無點選商品</p>
                 </div>
             </div>
 
-            <div class="form-group">
-                <label>客戶名稱 (選填)</label>
-                <input type="text" id="customerName" placeholder="客人名字" />
-            </div>
-
-            <button onclick="testModeB()">📤 提交銷售</button>
-
-            <div class="result" id="resultB">
-                <div class="result-title"></div>
-                <div class="result-body"></div>
-            </div>
-        </div>
-
-        <!-- 模式 C：金額推薦 -->
-        <div class="tab-content">
-            <div class="form-group">
-                <label>金額 (NT$)</label>
-                <input type="number" id="amount" placeholder="例如：1280" />
-            </div>
-
-            <div class="form-group">
-                <label>門市</label>
-                <select id="storeC">
-                    <option value="高雄">高雄</option>
-                    <option value="台中">台中</option>
-                </select>
-            </div>
-
-            <button onclick="testModeC()">🎯 查詢推薦商品</button>
-
-            <div class="result" id="resultC">
-                <div class="result-title"></div>
-                <div class="result-body"></div>
+            <!-- 結帳總金額與按鈕 -->
+            <div class="border-t pt-4">
+                <div class="flex justify-between items-center mb-4">
+                    <span class="text-lg font-bold text-gray-700">總計金額：</span>
+                    <span id="total-price" class="text-2xl font-extrabold text-red-600">NT$ 0</span>
+                </div>
+                <button onclick="checkout()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl text-lg shadow transition">
+                    確認結帳
+                </button>
             </div>
         </div>
 
-        <!-- 檢查庫存 -->
-        <div class="tab-content">
-            <button onclick="testInventory()">🔍 取得全部庫存</button>
+        <!-- 右側：商品圖文按鈕區 (佔 60%) -->
+        <div class="w-3/5 flex flex-col p-4 bg-gray-50 overflow-hidden">
+            
+            <!-- 分類標籤列 -->
+            <div id="category-tabs" class="flex gap-2 mb-4 overflow-x-auto pb-2">
+                <button onclick="filterCategory('all')" class="category-btn px-4 py-2 bg-blue-600 text-white font-medium rounded-lg shadow-sm whitespace-nowrap">全部商品</button>
+                <button onclick="filterCategory('烏魚子')" class="category-btn px-4 py-2 bg-white text-gray-700 border border-gray-300 font-medium rounded-lg shadow-sm whitespace-nowrap">烏魚子系列</button>
+                <button onclick="filterCategory('禮盒')" class="category-btn px-4 py-2 bg-white text-gray-700 border border-gray-300 font-medium rounded-lg shadow-sm whitespace-nowrap">精美禮盒</button>
+                <button onclick="filterCategory('手作')" class="category-btn px-4 py-2 bg-white text-gray-700 border border-gray-300 font-medium rounded-lg shadow-sm whitespace-nowrap">手作料理</button>
+            </div>
 
-            <div class="result" id="resultInventory">
-                <div class="result-title"></div>
-                <div class="result-body"></div>
+            <!-- 商品圖文網格 -->
+            <div id="product-grid" class="grid grid-cols-3 gap-4 overflow-y-auto p-1">
+                <!-- 商品會透過 JavaScript 自動渲染進來 -->
             </div>
         </div>
+
     </div>
 
+    <!-- JavaScript 邏輯 -->
     <script>
-        const API_URL = 'https://janus-kings-pos-production.up.railway.app';
-        let selectedProduct = null;
+        // 模擬商品資料庫（可替換成您的真實商品與圖片網址）
+        const products = [
+            { id: 1, name: "野生烏魚子切片", price: 500, category: "烏魚子", image: "https://via.placeholder.com/150" },
+            { id: 2, name: "頂級一口烏魚子", price: 350, category: "烏魚子", image: "https://via.placeholder.com/150" },
+            { id: 3, name: "過年豪華禮盒", price: 1200, category: "禮盒", image: "https://via.placeholder.com/150" },
+            { id: 4, name: "烏魚子炒飯", price: 180, category: "手作", image: "https://via.placeholder.com/150" },
+            { id: 5, name: "手作XO醬", price: 280, category: "手作", image: "https://via.placeholder.com/150" }
+        ];
 
-        // 頁面載入時取得商品列表
-        document.addEventListener('DOMContentLoaded', () => {
-            loadProducts();
-        });
+        let cart = []; // 購物車陣列
 
-        function switchTab(index) {
-            const tabs = document.querySelectorAll('.tab');
-            const contents = document.querySelectorAll('.tab-content');
+        // 初始化載入全部商品
+        window.onload = function() {
+            renderProducts(products);
+        };
 
-            tabs.forEach((tab, i) => {
-                tab.classList.toggle('active', i === index);
-            });
-
-            contents.forEach((content, i) => {
-                content.classList.toggle('active', i === index);
+        // 渲染商品按鈕網格
+        function renderProducts(items) {
+            const grid = document.getElementById('product-grid');
+            grid.innerHTML = '';
+            
+            items.forEach(product => {
+                const card = document.createElement('div');
+                card.className = 'bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden cursor-pointer hover:shadow-md hover:border-blue-400 transition flex flex-col justify-between';
+                card.onclick = () => addToCart(product);
+                
+                card.innerHTML = `
+                    <div class="h-28 bg-gray-200 flex items-center justify-center">
+                        <img src="${product.image}" alt="${product.name}" class="w-full h-full object-cover">
+                    </div>
+                    <div class="p-3 text-center">
+                        <h3 class="font-bold text-gray-800 text-sm truncate">${product.name}</h3>
+                        <p class="text-blue-600 font-bold mt-1">NT$ ${product.price}</p>
+                    </div>
+                `;
+                grid.appendChild(card);
             });
         }
 
-        async function loadProducts() {
-            try {
-                const response = await fetch(`${API_URL}/api/inventory`);
-                const data = await response.json();
-
-                if (data.status === 'success') {
-                    const grid = document.getElementById('productGrid');
-                    grid.innerHTML = '';
-
-                    data.data.forEach(product => {
-                        const card = document.createElement('div');
-                        card.className = 'product-card';
-                        card.innerHTML = `
-                            <div class="product-name">${product.name}</div>
-                            <div class="product-price">NT$${product.price}</div>
-                        `;
-                        card.onclick = () => selectProduct(product, card);
-                        grid.appendChild(card);
-                    });
-                } else {
-                    document.getElementById('productGrid').innerHTML = '<div class="loading">載入失敗</div>';
-                }
-            } catch (error) {
-                document.getElementById('productGrid').innerHTML = '<div class="loading">連線錯誤</div>';
+        // 分類篩選
+        function filterCategory(category) {
+            if (category === 'all') {
+                renderProducts(products);
+            } else {
+                const filtered = products.filter(p => p.category === category);
+                renderProducts(filtered);
             }
         }
 
-        function selectProduct(product, cardElement) {
-            // 移除舊的選中狀態
-            document.querySelectorAll('.product-card').forEach(card => {
-                card.classList.remove('selected');
-            });
-
-            // 設定新的選中狀態
-            cardElement.classList.add('selected');
-            selectedProduct = product;
-
-            // 隱藏結果框
-            document.getElementById('resultB').classList.remove('show');
+        // 加入購物車
+        function addToCart(product) {
+            const existingItem = cart.find(item => item.id === product.id);
+            if (existingItem) {
+                existingItem.quantity += 1;
+            } else {
+                cart.push({ ...product, quantity: 1 });
+            }
+            updateCartUI();
         }
 
-        function showResult(elementId, success, title, message) {
-            const result = document.getElementById(elementId);
-            result.classList.add('show');
-            result.classList.toggle('success', success);
-            result.classList.toggle('error', !success);
-
-            result.querySelector('.result-title').textContent = title;
-            result.querySelector('.result-body').innerHTML = message;
+        // 變更數量
+        function changeQuantity(id, delta) {
+            const item = cart.find(i => i.id === id);
+            if (item) {
+                item.quantity += delta;
+                if (item.quantity <= 0) {
+                    cart = cart.filter(i => i.id !== id);
+                }
+            }
+            updateCartUI();
         }
 
-        async function testModeB() {
-            if (!selectedProduct) {
-                showResult('resultB', false, '❌ 錯誤', '請先選擇商品');
+        // 更新購物車畫面
+        function updateCartUI() {
+            const cartContainer = document.getElementById('cart-items');
+            const totalPriceElement = document.getElementById('total-price');
+            
+            if (cart.length === 0) {
+                cartContainer.innerHTML = '<p class="text-gray-400 text-center py-10">尚無點選商品</p>';
+                totalPriceElement.innerText = 'NT$ 0';
                 return;
             }
 
-            const quantity = parseInt(document.getElementById('quantity').value);
-            const store = document.getElementById('store').value;
-            const staff = document.getElementById('staff').value;
-            const customerName = document.getElementById('customerName').value;
+            cartContainer.innerHTML = '';
+            let total = 0;
 
-            if (!staff) {
-                showResult('resultB', false, '❌ 錯誤', '請選擇銷售人員');
-                return;
-            }
+            cart.forEach(item => {
+                total += item.price * item.quantity;
+                const itemRow = document.createElement('div');
+                itemRow.className = 'flex justify-between items-center bg-gray-50 p-2 rounded-lg border border-gray-100';
+                itemRow.innerHTML = `
+                    <div class="flex-1">
+                        <h4 class="text-sm font-bold text-gray-800">${item.name}</h4>
+                        <span class="text-xs text-gray-500">NT$ ${item.price} x ${item.quantity}</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button onclick="changeQuantity(${item.id}, -1)" class="w-7 h-7 bg-gray-200 rounded-md font-bold text-gray-600 hover:bg-gray-300">-</button>
+                        <span class="text-sm font-bold w-5 text-center">${item.quantity}</span>
+                        <button onclick="changeQuantity(${item.id}, 1)" class="w-7 h-7 bg-gray-200 rounded-md font-bold text-gray-600 hover:bg-gray-300">+</button>
+                    </div>
+                `;
+                cartContainer.appendChild(itemRow);
+            });
 
-            try {
-                const response = await fetch(`${API_URL}/api/sales/create`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        product_name: selectedProduct.name,
-                        quantity: quantity,
-                        store: store,
-                        staff: staff,
-                        customer_name: customerName || '客人',
-                        customer_phone: ''
-                    })
-                });
-
-                const data = await response.json();
-
-                if (data.status === 'success') {
-                    const msg = `
-                        <strong>✅ 銷售成功！</strong><br/><br/>
-                        商品: ${data.data.product_name}<br/>
-                        數量: ${data.data.quantity}<br/>
-                        金額: NT$${data.data.total}<br/>
-                        剩餘庫存: ${data.data.new_stock}
-                    `;
-                    showResult('resultB', true, '✅ 銷售完成', msg);
-                } else {
-                    showResult('resultB', false, '❌ 銷售失敗', data.message || '未知錯誤');
-                }
-            } catch (error) {
-                showResult('resultB', false, '❌ 連線錯誤', error.message);
-            }
+            totalPriceElement.innerText = `NT$ ${total}`;
         }
 
-        async function testModeC() {
-            const amount = parseInt(document.getElementById('amount').value);
-            const store = document.getElementById('storeC').value;
-
-            if (!amount) {
-                showResult('resultC', false, '❌ 錯誤', '請輸入金額');
+        // 結帳動作
+        function checkout() {
+            if (cart.length === 0) {
+                alert('目前購物車是空的！');
                 return;
             }
-
-            try {
-                const response = await fetch(`${API_URL}/api/amount/predict?amount=${amount}&store=${store}`);
-                const data = await response.json();
-
-                if (data.status === 'success') {
-                    const products = data.data.suggested_products.join('<br/>');
-                    const msg = `
-                        <strong>推薦商品:</strong><br/>
-                        ${products}<br/><br/>
-                        信心度: ${data.data.confidence}%
-                    `;
-                    showResult('resultC', true, '✅ 查詢成功', msg);
-                } else {
-                    showResult('resultC', false, '⚠️ 無推薦', data.message);
-                }
-            } catch (error) {
-                showResult('resultC', false, '❌ 連線錯誤', error.message);
-            }
-        }
-
-        async function testInventory() {
-            try {
-                const response = await fetch(`${API_URL}/api/inventory`);
-                const data = await response.json();
-
-                if (data.status === 'success') {
-                    const items = data.data.slice(0, 15);
-                    let html = `<strong>庫存清單 (前 15 件):</strong><br/><br/>`;
-                    items.forEach((item, i) => {
-                        html += `
-                            ${i + 1}. <strong>${item.name}</strong><br/>
-                            💰 NT$${item.price} | 📦 ${item.total} 件<br/>
-                        `;
-                    });
-                    html += `<br/><em>共 ${data.data.length} 件商品</em>`;
-                    showResult('resultInventory', true, '✅ 庫存已讀取', html);
-                } else {
-                    showResult('resultInventory', false, '❌ 錯誤', data.message);
-                }
-            } catch (error) {
-                showResult('resultInventory', false, '❌ 連線錯誤', error.message);
-            }
+            alert('結帳成功！總金額：' + document.getElementById('total-price').innerText);
+            cart = [];
+            updateCartUI();
         }
     </script>
 </body>
