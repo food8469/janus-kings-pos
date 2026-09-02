@@ -9,16 +9,19 @@
 <body class="bg-gray-100 font-sans h-screen overflow-hidden">
 
     <div class="flex h-full">
+        <!-- 左側：購物車區 (40%) -->
         <div class="w-2/5 bg-white border-r border-gray-200 flex flex-col justify-between p-4 shadow-md h-full">
             <div class="flex flex-col h-full overflow-hidden">
                 <h1 class="text-2xl font-bold text-gray-800 mb-2">🐟 野烏金 POS</h1>
                 <p class="text-sm font-bold text-gray-700 mb-2">目前點選清單</p>
 
+                <!-- 購物車清單 -->
                 <div id="cart-items" class="flex-1 overflow-y-auto space-y-2 pr-1 my-2">
                     <p class="text-gray-400 text-center py-10">尚無點選商品，請由右側點選</p>
                 </div>
             </div>
 
+            <!-- 結帳總金額與按鈕 -->
             <div class="border-t pt-3 mt-auto">
                 <div class="flex justify-between items-center mb-3">
                     <span class="text-lg font-bold text-gray-700">總計金額：</span>
@@ -30,18 +33,20 @@
             </div>
         </div>
 
+        <!-- 右側：商品卡片網格 (60%) -->
         <div class="w-3/5 flex flex-col p-4 bg-gray-50 h-full overflow-hidden">
             <div id="product-grid" class="grid grid-cols-2 md:grid-cols-3 gap-3 overflow-y-auto p-1 flex-1">
-                </div>
+            </div>
         </div>
     </div>
 
+    <!-- 💡 規格與口味選擇彈窗 (Modal) -->
     <div id="option-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
             <h3 id="modal-product-name" class="text-lg font-bold text-gray-800 border-b pb-2">選擇商品規格</h3>
             
             <div id="modal-content" class="space-y-4">
-                </div>
+            </div>
 
             <div class="flex justify-end gap-2 pt-2 border-t">
                 <button onclick="closeModal()" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-300">取消</button>
@@ -50,6 +55,7 @@
         </div>
     </div>
 
+    <!-- JavaScript 邏輯 -->
     <script>
         // 商品資料庫
         const products = [
@@ -133,16 +139,6 @@
                         ]
                     },
                     {
-                        specName: "9兩",
-                        flavors: [
-                            { name: "鹽味", price: 3480 },
-                            { name: "紅酒", price: 3480 },
-                            { name: "味噌", price: 3580 },
-                            { name: "香辣", price: 3580 },
-                            { name: "花雕", price: 3580 }
-                        ]
-                    },
-                    {
                         specName: "10兩",
                         flavors: [
                             { name: "鹽味", price: 4280 },
@@ -161,9 +157,9 @@
                             { name: "香辣", price: 5080 },
                             { name: "花雕", price: 5080 }
                         ]
-                    },
+                    }
                 ]
-            }, // 👈 已補上先前遺漏的逗號
+            }, 
             { id: 4, name: "特殊口味碳烤烏魚子", price: 1680, category: "手作", image: "大方1.jpg" },
             { id: 5, name: "雙園禮盒", price: 180, category: "手作", image: "https://via.placeholder.com/150" },
             { id: 6, name: "烏魚子牛奶糖", price: 280, category: "手作", image: "https://via.placeholder.com/150" }
@@ -189,7 +185,6 @@
                 card.className = 'bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden cursor-pointer hover:shadow-md transition flex flex-col justify-between active:scale-95 duration-150';
                 card.onclick = () => handleProductClick(product);
                 
-                // 動態計算展示價格
                 let displayPrice = "";
                 if (product.options) {
                     displayPrice = `NT$ ${product.options[0].price} 起`;
@@ -219,24 +214,21 @@
             selectedFlavorObj = null;
 
             if (product.specs) {
-                // 有兩數與口味 (多階層)
                 openSpecModal(product);
             } else if (product.options) {
-                // 只有口味選項
                 openOptionModal(product);
             } else {
-                // 單一商品
                 addToCart(product.name, product.price);
             }
         }
 
-        // 開啟單層選項彈窗 (例如一口吃)
+        // 開啟單層選項彈窗
         function openOptionModal(product) {
             document.getElementById('modal-product-name').innerText = `選擇【${product.name}】口味`;
             document.getElementById('modal-confirm-btn').classList.add('hidden');
             
             const container = document.getElementById('modal-content');
-            container.innerHTML = '<div id="modal-options" class="grid grid-cols-2 gap-2"></div>';
+            container.innerHTML = '<div id="modal-options" class="grid grid-cols-2 gap-2 max-h-60 overflow-y-auto p-1"></div>';
             
             const optionsBox = document.getElementById('modal-options');
             product.options.forEach(opt => {
@@ -256,7 +248,7 @@
             showModal();
         }
 
-        // 開啟兩數 + 口味彈窗 (例如碳烤烏魚子)
+        // 開啟兩數 + 口味彈窗 (加入 max-h-36 與 overflow-y-auto 允許自動捲動)
         function openSpecModal(product) {
             document.getElementById('modal-product-name').innerText = `選擇【${product.name}】規格與口味`;
             const container = document.getElementById('modal-content');
@@ -264,11 +256,11 @@
             container.innerHTML = `
                 <div>
                     <label class="block text-xs font-bold text-gray-500 mb-1">1. 選擇兩數</label>
-                    <div id="spec-box" class="grid grid-cols-3 gap-2"></div>
+                    <div id="spec-box" class="grid grid-cols-3 gap-2 max-h-36 overflow-y-auto p-1 border border-gray-100 rounded-lg"></div>
                 </div>
                 <div>
                     <label class="block text-xs font-bold text-gray-500 mb-1">2. 選擇口味</label>
-                    <div id="flavor-box" class="grid grid-cols-2 gap-2 text-xs text-gray-400 py-2">請先選擇兩數</div>
+                    <div id="flavor-box" class="grid grid-cols-2 gap-2 text-xs text-gray-400 py-2 max-h-48 overflow-y-auto p-1">請先選擇兩數</div>
                 </div>
             `;
 
@@ -281,9 +273,10 @@
                 specBox.appendChild(btn);
             });
 
-            document.getElementById('modal-confirm-btn').classList.remove('hidden');
-            document.getElementById('modal-confirm-btn').disabled = true;
-            document.getElementById('modal-confirm-btn').classList.add('opacity-50');
+            const confirmBtn = document.getElementById('modal-confirm-btn');
+            confirmBtn.classList.remove('hidden');
+            confirmBtn.disabled = true;
+            confirmBtn.classList.add('opacity-50', 'cursor-not-allowed');
 
             showModal();
         }
@@ -313,6 +306,11 @@
                 `;
                 flavorBox.appendChild(btn);
             });
+
+            // 換兩數時重置確認按鈕為停用狀態
+            const confirmBtn = document.getElementById('modal-confirm-btn');
+            confirmBtn.disabled = true;
+            confirmBtn.classList.add('opacity-50', 'cursor-not-allowed');
         }
 
         // 選擇口味
@@ -326,7 +324,7 @@
 
             const confirmBtn = document.getElementById('modal-confirm-btn');
             confirmBtn.disabled = false;
-            confirmBtn.classList.remove('opacity-50');
+            confirmBtn.classList.remove('opacity-50', 'cursor-not-allowed');
         }
 
         // 確認選取加入購物車
