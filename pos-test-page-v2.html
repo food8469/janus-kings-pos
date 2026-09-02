@@ -124,3 +124,300 @@
                     },
                     {
                         specName: "9兩",
+                        flavors: [
+                            { name: "鹽味", price: 3480 },
+                            { name: "紅酒", price: 3480 },
+                            { name: "味噌", price: 3580 },
+                            { name: "香辣", price: 3580 },
+                            { name: "花雕", price: 3580 }
+                        ]
+                    },
+                    {
+                        specName: "10兩",
+                        flavors: [
+                            { name: "鹽味", price: 4280 },
+                            { name: "紅酒", price: 4280 },
+                            { name: "味噌", price: 4380 },
+                            { name: "香辣", price: 4380 },
+                            { name: "花雕", price: 4380 }
+                        ]
+                    },
+                    {
+                        specName: "11兩",
+                        flavors: [
+                            { name: "鹽味", price: 4980 },
+                            { name: "紅酒", price: 4980 },
+                            { name: "味噌", price: 5080 },
+                            { name: "香辣", price: 5080 },
+                            { name: "花雕", price: 5080 }
+                        ]
+                    }
+                ]
+            },
+            { 
+                id: 4,
+                name: "特殊口味碳烤烏魚子",
+                image: "大方1.jpg", // 👈 補上缺少的引號
+                specs: [
+                    {
+                        specName: "5兩",
+                        flavors: [
+                            { name: "竹鹽", price: 1680 },
+                            { name: "玫瑰紅酒", price: 1680 },
+                            { name: "黑松露", price: 2080 },
+                            { name: "瑤柱干貝", price: 2080 },
+                            { name: "哇沙米", price: 2080 }
+                        ]
+                    }
+                ] // 👈 補上關閉的方括號
+            },
+            { id: 5, name: "雙園禮盒", price: 180, category: "手作", image: "https://via.placeholder.com/150" },
+            { id: 6, name: "烏魚子牛奶糖", price: 280, category: "手作", image: "https://via.placeholder.com/150" }
+        ];
+
+        let cart = []; 
+        let currentProduct = null;
+        let selectedSpec = null;
+        let selectedFlavorObj = null;
+
+        window.onload = function() {
+            renderProducts();
+        };
+
+        // 渲染商品網格
+        function renderProducts() {
+            const grid = document.getElementById('product-grid');
+            if (!grid) return;
+            grid.innerHTML = '';
+            
+            products.forEach(product => {
+                const card = document.createElement('div');
+                card.className = 'bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden cursor-pointer hover:shadow-md transition flex flex-col justify-between active:scale-95 duration-150';
+                card.onclick = () => handleProductClick(product);
+                
+                let displayPrice = "";
+                if (product.options) {
+                    displayPrice = `NT$ ${product.options[0].price} 起`;
+                } else if (product.specs) {
+                    displayPrice = `NT$ ${product.specs[0].flavors[0].price} 起`;
+                } else {
+                    displayPrice = `NT$ ${product.price}`;
+                }
+
+                card.innerHTML = `
+                    <div class="h-60 bg-gray-100 flex items-center justify-center overflow-hidden">
+                        <img src="${product.image}" alt="${product.name}" class="w-full h-full object-cover" onerror="this.src='https://via.placeholder.com/300?text=野烏金'">
+                    </div>
+                    <div class="p-3 text-center bg-white border-t border-gray-50">
+                        <h3 class="font-bold text-gray-800 text-sm">${product.name}</h3>
+                        <p class="text-indigo-600 font-extrabold text-xs mt-1">${displayPrice}</p>
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+        }
+
+        // 點擊商品處理邏輯
+        function handleProductClick(product) {
+            currentProduct = product;
+            selectedSpec = null;
+            selectedFlavorObj = null;
+
+            if (product.specs) {
+                openSpecModal(product);
+            } else if (product.options) {
+                openOptionModal(product);
+            } else {
+                addToCart(product.name, product.price);
+            }
+        }
+
+        // 開啟單層選項彈窗
+        function openOptionModal(product) {
+            document.getElementById('modal-product-name').innerText = `選擇【${product.name}】口味`;
+            document.getElementById('modal-confirm-btn').classList.add('hidden');
+            
+            const container = document.getElementById('modal-content');
+            container.innerHTML = '<div id="modal-options" class="grid grid-cols-2 gap-2 max-h-60 overflow-y-auto p-1"></div>';
+            
+            const optionsBox = document.getElementById('modal-options');
+            product.options.forEach(opt => {
+                const btn = document.createElement('button');
+                btn.className = 'p-3 border-2 border-indigo-100 bg-indigo-50/50 hover:bg-indigo-600 hover:text-white rounded-xl text-left transition font-bold text-sm flex flex-col justify-between';
+                btn.onclick = () => {
+                    addToCart(`${product.name} (${opt.name})`, opt.price);
+                    closeModal();
+                };
+                btn.innerHTML = `
+                    <span class="block">${opt.name}</span>
+                    <span class="block text-indigo-500 font-extrabold mt-1 hover:text-white">NT$ ${opt.price}</span>
+                `;
+                optionsBox.appendChild(btn);
+            });
+
+            showModal();
+        }
+
+        // 開啟兩數 + 口味彈窗 (允許捲動顯示所有兩數)
+        function openSpecModal(product) {
+            document.getElementById('modal-product-name').innerText = `選擇【${product.name}】規格與口味`;
+            const container = document.getElementById('modal-content');
+            
+            container.innerHTML = `
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 mb-1">1. 選擇兩數</label>
+                    <div id="spec-box" class="grid grid-cols-3 gap-2 max-h-36 overflow-y-auto p-1 border border-gray-100 rounded-lg"></div>
+                </div>
+                <div>
+                    <label class="block text-xs font-bold text-gray-500 mb-1">2. 選擇口味</label>
+                    <div id="flavor-box" class="grid grid-cols-2 gap-2 text-xs text-gray-400 py-2 max-h-48 overflow-y-auto p-1">請先選擇兩數</div>
+                </div>
+            `;
+
+            const specBox = document.getElementById('spec-box');
+            product.specs.forEach(s => {
+                const btn = document.createElement('button');
+                btn.className = 'spec-btn p-2 border border-gray-300 rounded-lg text-xs font-bold text-gray-700 hover:border-indigo-500';
+                btn.innerText = s.specName;
+                btn.onclick = () => selectSpec(s, btn);
+                specBox.appendChild(btn);
+            });
+
+            const confirmBtn = document.getElementById('modal-confirm-btn');
+            confirmBtn.classList.remove('hidden');
+            confirmBtn.disabled = true;
+            confirmBtn.classList.add('opacity-50', 'cursor-not-allowed');
+
+            showModal();
+        }
+
+        // 選擇兩數
+        function selectSpec(specObj, element) {
+            selectedSpec = specObj;
+            selectedFlavorObj = null;
+
+            document.querySelectorAll('.spec-btn').forEach(b => {
+                b.classList.remove('bg-indigo-600', 'text-white', 'border-indigo-600');
+                b.classList.add('text-gray-700', 'border-gray-300');
+            });
+            element.classList.remove('text-gray-700', 'border-gray-300');
+            element.classList.add('bg-indigo-600', 'text-white', 'border-indigo-600');
+
+            const flavorBox = document.getElementById('flavor-box');
+            flavorBox.innerHTML = '';
+
+            specObj.flavors.forEach(f => {
+                const btn = document.createElement('button');
+                btn.className = 'flavor-btn p-2 border border-gray-300 rounded-lg text-left hover:border-indigo-500 flex justify-between items-center';
+                btn.onclick = () => selectFlavor(f, btn);
+                btn.innerHTML = `
+                    <span class="text-xs font-bold text-gray-800">${f.name}</span>
+                    <span class="text-xs text-indigo-600 font-extrabold">NT$ ${f.price}</span>
+                `;
+                flavorBox.appendChild(btn);
+            });
+
+            const confirmBtn = document.getElementById('modal-confirm-btn');
+            confirmBtn.disabled = true;
+            confirmBtn.classList.add('opacity-50', 'cursor-not-allowed');
+        }
+
+        // 選擇口味
+        function selectFlavor(flavorObj, element) {
+            selectedFlavorObj = flavorObj;
+
+            document.querySelectorAll('.flavor-btn').forEach(b => {
+                b.classList.remove('border-indigo-600', 'bg-indigo-50');
+            });
+            element.classList.add('border-indigo-600', 'bg-indigo-50');
+
+            const confirmBtn = document.getElementById('modal-confirm-btn');
+            confirmBtn.disabled = false;
+            confirmBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        }
+
+        // 確認選取加入購物車
+        function confirmSpecAddToCart() {
+            if (!selectedSpec || !selectedFlavorObj) return;
+            const fullName = `${currentProduct.name}-${selectedSpec.specName} (${selectedFlavorObj.name})`;
+            addToCart(fullName, selectedFlavorObj.price);
+            closeModal();
+        }
+
+        function showModal() {
+            document.getElementById('option-modal').classList.remove('hidden');
+            document.getElementById('option-modal').classList.add('flex');
+        }
+
+        function closeModal() {
+            document.getElementById('option-modal').classList.add('hidden');
+            document.getElementById('option-modal').classList.remove('flex');
+        }
+
+        // 加入購物車
+        function addToCart(fullName, price) {
+            const existingItem = cart.find(item => item.name === fullName);
+            if (existingItem) {
+                existingItem.quantity += 1;
+            } else {
+                cart.push({ name: fullName, price: price, quantity: 1 });
+            }
+            updateCartUI();
+        }
+
+        // 變更數量
+        function changeQuantity(name, delta) {
+            const item = cart.find(i => i.name === name);
+            if (item) {
+                item.quantity += delta;
+                if (item.quantity <= 0) {
+                    cart = cart.filter(i => i.name !== name);
+                }
+            }
+            updateCartUI();
+        }
+
+        // 更新購物車 UI
+        function updateCartUI() {
+            const cartContainer = document.getElementById('cart-items');
+            const totalPriceElement = document.getElementById('total-price');
+            
+            if (cart.length === 0) {
+                cartContainer.innerHTML = '<p class="text-gray-400 text-center py-10">尚無點選商品，請由右側點選</p>';
+                totalPriceElement.innerText = 'NT$ 0';
+                return;
+            }
+
+            cartContainer.innerHTML = '';
+            let total = 0;
+
+            cart.forEach(item => {
+                total += item.price * item.quantity;
+                const itemRow = document.createElement('div');
+                itemRow.className = 'flex justify-between items-center bg-gray-50 p-2 rounded-lg border border-gray-200';
+                itemRow.innerHTML = `
+                    <div class="flex-1 pr-2">
+                        <h4 class="text-xs font-bold text-gray-800">${item.name}</h4>
+                        <span class="text-xs text-gray-500">NT$ ${item.price}</span>
+                    </div>
+                    <div class="flex items-center gap-1">
+                        <button onclick="changeQuantity('${item.name}', -1)" class="w-6 h-6 bg-white border border-gray-300 rounded font-bold hover:bg-gray-100">-</button>
+                        <span class="text-xs font-bold w-6 text-center">${item.quantity}</span>
+                        <button onclick="changeQuantity('${item.name}', 1)" class="w-6 h-6 bg-white border border-gray-300 rounded font-bold hover:bg-gray-100">+</button>
+                    </div>
+                `;
+                cartContainer.appendChild(itemRow);
+            });
+
+            totalPriceElement.innerText = `NT$ ${total}`;
+        }
+
+        function checkout() {
+            if (cart.length === 0) return alert('目前購物車是空的！');
+            alert('結帳成功！總金額：' + document.getElementById('total-price').innerText);
+            cart = [];
+            updateCartUI();
+        }
+    </script>
+</body>
+</html>
