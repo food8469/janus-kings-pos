@@ -7,6 +7,31 @@
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-100 font-sans h-screen overflow-hidden">
+    <div class="flex flex-col h-full">
+        
+        <!-- 💡 頂部狀態欄：門市與值班人員選擇 -->
+        <header class="bg-indigo-900 text-white px-4 py-2 flex justify-between items-center shadow-md z-10 flex-none">
+            <div class="flex items-center gap-2">
+                <span class="text-xl font-bold">🐟 野烏金 POS 系統</span>
+            </div>
+            <div class="flex items-center gap-4 text-sm">
+                <div class="flex items-center gap-1">
+                    <label class="font-bold text-indigo-200">門市：</label>
+                    <select id="store-select" class="bg-indigo-800 text-white font-bold rounded px-2 py-1 outline-none border border-indigo-700">
+                        <option value="高雄總部">高雄總部</option>
+                        <option value="台中門市">台中門市</option>
+                    </select>
+                </div>
+                <div class="flex items-center gap-1">
+                    <label class="font-bold text-indigo-200">服務人員：</label>
+                    <select id="staff-select" class="bg-indigo-800 text-white font-bold rounded px-2 py-1 outline-none border border-indigo-700">
+                        <option value="店長">店長</option>
+                        <option value="人員A">人員 A</option>
+                        <option value="人員B">人員 B</option>
+                    </select>
+                </div>
+            </div>
+        </header>
 
     <div class="flex h-full">
         <!-- 左側：購物車區 (40%) -->
