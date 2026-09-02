@@ -6,7 +6,6 @@
     <title>野烏金 POS 系統</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        /* 解決 iPad 瀏覽器 h-screen / 100vh 被網址列遮擋的問題 */
         .app-height {
             height: 100vh;
             height: 100dvh;
@@ -15,12 +14,13 @@
 </head>
 <body class="bg-gray-100 font-sans app-height w-screen overflow-hidden flex flex-col">
 
-    <!-- 💡 頂部狀態欄：門市與值班人員選擇 -->
-    <header class="bg-indigo-900 text-white px-3 py-1.5 flex justify-between items-center shadow-md flex-none">
+    <!-- 💡 頂部狀態欄：門市、人員與漢堡選單按鈕 -->
+    <header class="bg-indigo-900 text-white px-3 py-1.5 flex justify-between items-center shadow-md flex-none z-20">
         <div class="flex items-center gap-2">
             <span class="text-sm sm:text-base font-bold">🐟 野烏金 POS 系統</span>
         </div>
-        <div class="flex items-center gap-2 text-xs">
+        
+        <div class="flex items-center gap-3 text-xs">
             <div class="flex items-center gap-1">
                 <label class="font-bold text-indigo-200">門市：</label>
                 <select id="store-select" class="bg-indigo-800 text-white font-bold rounded px-1.5 py-0.5 outline-none border border-indigo-700">
@@ -36,36 +36,35 @@
                     <option value="人員B">人員 B</option>
                 </select>
             </div>
+
+            <!-- 🍔 右上角選單按鈕 (漢堡按鈕) -->
+            <button onclick="toggleMenu()" class="bg-indigo-800 hover:bg-indigo-700 active:bg-indigo-600 text-white px-2.5 py-1 rounded-lg border border-indigo-600 font-bold text-base flex items-center justify-center transition">
+                ☰
+            </button>
         </div>
     </header>
 
-    <!-- 主要內容區域：最左側選單 + 主畫面 -->
-    <div class="flex flex-1 overflow-hidden min-h-0">
+    <!-- 💡 右上角彈出式選單 (Dropdown Menu) -->
+    <div id="dropdown-menu" class="fixed top-11 right-3 bg-white text-gray-800 shadow-2xl rounded-2xl border border-gray-200 w-48 hidden flex-col overflow-hidden z-50">
+        <div class="bg-gray-50 px-4 py-2 border-b border-gray-100 text-xs font-bold text-gray-400">
+            系統頁面切換
+        </div>
+        <button onclick="switchTab('pos')" class="px-4 py-3 text-left hover:bg-indigo-50 font-bold text-xs flex items-center gap-2 border-b border-gray-50 transition">
+            <span>🛒</span> 點餐收銀畫面
+        </button>
+        <button onclick="switchTab('stock')" class="px-4 py-3 text-left hover:bg-indigo-50 font-bold text-xs flex items-center gap-2 border-b border-gray-50 transition">
+            <span>📦</span> 庫存管理
+        </button>
+        <button onclick="switchTab('orders')" class="px-4 py-3 text-left hover:bg-indigo-50 font-bold text-xs flex items-center gap-2 transition">
+            <span>📊</span> 當日銷售紀錄
+        </button>
+    </div>
+
+    <!-- 主要內容區域：主畫面 (左購物車 40% + 右商品 60%) -->
+    <div class="flex flex-1 overflow-hidden min-h-0 relative">
         
-        <!-- 🍔 最左側功能選單欄 (Sidebar) -->
-        <nav class="w-16 sm:w-20 bg-indigo-950 text-white flex flex-col items-center py-3 gap-4 flex-none border-r border-indigo-800">
-            <!-- 點餐收銀頁面按鈕 -->
-            <button onclick="switchTab('pos')" id="nav-pos" class="nav-btn w-12 h-12 rounded-xl flex flex-col items-center justify-center bg-indigo-600 text-white shadow transition">
-                <span class="text-lg">🛒</span>
-                <span class="text-[10px] font-bold mt-0.5">點餐</span>
-            </button>
-
-            <!-- 庫存管理頁面按鈕 -->
-            <button onclick="switchTab('stock')" id="nav-stock" class="nav-btn w-12 h-12 rounded-xl flex flex-col items-center justify-center hover:bg-indigo-800 text-indigo-200 transition">
-                <span class="text-lg">📦</span>
-                <span class="text-[10px] font-bold mt-0.5">庫存</span>
-            </button>
-
-            <!-- 銷售紀錄頁面按鈕 -->
-            <button onclick="switchTab('orders')" id="nav-orders" class="nav-btn w-12 h-12 rounded-xl flex flex-col items-center justify-center hover:bg-indigo-800 text-indigo-200 transition">
-                <span class="text-lg">📊</span>
-                <span class="text-[10px] font-bold mt-0.5">紀錄</span>
-            </button>
-        </nav>
-
-        <!-- 畫面 1：點餐結帳區 (POS 畫面) -->
-        <div id="page-pos" class="page-content flex flex-1 overflow-hidden min-h-0">
-            <!-- 左側：購物車區 (40%) -->
+        <!-- 畫面 1：點餐結帳區 -->
+        <div id="page-pos" class="page-content flex flex-1 overflow-hidden min-h-0 w-full">
             <div class="w-2/5 bg-white border-r border-gray-200 flex flex-col p-2.5 shadow-md h-full overflow-hidden">
                 <div class="flex justify-between items-center pb-1 border-b border-gray-100 flex-none">
                     <h2 class="text-xs font-bold text-gray-700">目前點選清單</h2>
@@ -76,7 +75,6 @@
                     <p class="text-gray-400 text-center py-4 text-xs">尚無點選商品，請由右側點選</p>
                 </div>
 
-                <!-- 固定底部結帳區 -->
                 <div class="border-t border-gray-200 pt-1.5 flex-none space-y-1 bg-white">
                     <div class="bg-gray-50 p-1.5 rounded-lg border border-gray-200 flex items-center justify-between gap-1">
                         <span class="text-xs font-bold text-gray-600 flex-none">折扣：</span>
@@ -111,23 +109,22 @@
                 </div>
             </div>
 
-            <!-- 右側：商品卡片網格 (60%) -->
             <div class="w-3/5 flex flex-col p-2.5 bg-gray-50 h-full overflow-hidden">
                 <div id="product-grid" class="grid grid-cols-3 gap-2 overflow-y-auto p-0.5 h-full content-start items-start">
                 </div>
             </div>
         </div>
 
-        <!-- 畫面 2：庫存管理區 (預留擴充) -->
-        <div id="page-stock" class="page-content hidden flex-1 p-6 bg-gray-50 overflow-y-auto">
+        <!-- 畫面 2：庫存管理區 -->
+        <div id="page-stock" class="page-content hidden flex-1 p-6 bg-gray-50 overflow-y-auto w-full">
             <h2 class="text-xl font-bold text-gray-800 mb-4">📦 商品庫存管理</h2>
             <div class="bg-white p-4 rounded-xl shadow border border-gray-200">
                 <p class="text-gray-500 text-sm">此頁面可檢視與調整各項品項庫存數量。</p>
             </div>
         </div>
 
-        <!-- 画面 3：銷售紀錄區 (預留擴充) -->
-        <div id="page-orders" class="page-content hidden flex-1 p-6 bg-gray-50 overflow-y-auto">
+        <!-- 畫面 3：銷售紀錄區 -->
+        <div id="page-orders" class="page-content hidden flex-1 p-6 bg-gray-50 overflow-y-auto w-full">
             <h2 class="text-xl font-bold text-gray-800 mb-4">📊 當日銷售紀錄</h2>
             <div class="bg-white p-4 rounded-xl shadow border border-gray-200">
                 <p class="text-gray-500 text-sm">此頁面可查詢本班次銷售總額與歷史銷售單。</p>
@@ -140,9 +137,7 @@
     <div id="option-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center p-4 z-50">
         <div class="bg-white rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4">
             <h3 id="modal-product-name" class="text-base font-bold text-gray-800 border-b pb-2">選擇商品規格</h3>
-            
             <div id="modal-content" class="space-y-3"></div>
-
             <div class="flex justify-end gap-2 pt-2 border-t">
                 <button onclick="closeModal()" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-xs font-bold hover:bg-gray-300">取消</button>
                 <button id="modal-confirm-btn" onclick="confirmSpecAddToCart()" class="px-5 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 hidden">確定加入</button>
