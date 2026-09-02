@@ -89,57 +89,95 @@
             renderProducts(products);
         };
 
-        // 渲染商品按鈕網格
-        function renderProducts(items) {
+        // 渲染商品列表
+        function renderProducts() {
             const grid = document.getElementById('product-grid');
             grid.innerHTML = '';
             
-            items.forEach(product => {
+            products.forEach(product => {
                 const card = document.createElement('div');
-                card.className = 'bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden cursor-pointer hover:shadow-md hover:border-blue-400 transition flex flex-col justify-between';
-                card.onclick = () => addToCart(product);
+                card.className = 'bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden cursor-pointer hover:shadow-md transition flex flex-col justify-between active:scale-95 duration-150';
+                card.onclick = () => handleProductClick(product);
                 
+                // 顯示起價或單價
+                const displayPrice = product.options 
+                    ? `NT$ ${product.options[0].price} 起` 
+                    : `NT$ ${product.price}`;
+
                 card.innerHTML = `
-                    <div class="h-28 bg-gray-200 flex items-center justify-center">
+                    <div class="h-28 bg-gray-100 flex items-center justify-center overflow-hidden">
                         <img src="${product.image}" alt="${product.name}" class="w-full h-full object-cover">
                     </div>
-                    <div class="p-3 text-center">
-                        <h3 class="font-bold text-gray-800 text-sm truncate">${product.name}</h3>
-                        <p class="text-blue-600 font-bold mt-1">NT$ ${product.price}</p>
+                    <div class="p-2 text-center">
+                        <h3 class="font-bold text-gray-800 text-sm">${product.name}</h3>
+                        <p class="text-indigo-600 font-extrabold text-xs mt-1">${displayPrice}</p>
                     </div>
                 `;
                 grid.appendChild(card);
             });
         }
 
-        // 分類篩選
-        function filterCategory(category) {
-            if (category === 'all') {
-                renderProducts(products);
+        // 點擊商品判斷是否有規格選項
+        function handleProductClick(product) {
+            if (product.options && product.options.length > 0) {
+                // 有規格選項 -> 開啟彈窗
+                openModal(product);
             } else {
-                const filtered = products.filter(p => p.category === category);
-                renderProducts(filtered);
+                // 一般商品 -> 直接加入購物車
+                addToCart(product.name, product.price);
             }
         }
 
+        // 開啟選項彈窗
+        function openModal(product) {
+            currentSelectedProduct = product;
+            document.getElementById('modal-product-name').innerText = `選擇【${product.name}】規格`;
+            
+            const optionsContainer = document.getElementById('modal-options');
+            optionsContainer.innerHTML = '';
+
+            product.options.forEach(opt => {
+                const btn = document.createElement('button');
+                btn.className = 'p-3 border-2 border-indigo-100 bg-indigo-50/50 hover:bg-indigo-600 hover:text-white rounded-xl text-left transition font-bold text-sm flex flex-col justify-between';
+                btn.onclick = () => {
+                    addToCart(`${product.name} (${opt.name})`, opt.price);
+                    closeModal();
+                };
+                btn.innerHTML = `
+                    <span class="block">${opt.name}</span>
+                    <span class="block text-indigo-500 font-extrabold mt-1 hover:text-white">NT$ ${opt.price}</span>
+                `;
+                optionsContainer.appendChild(btn);
+            });
+
+            document.getElementById('option-modal').classList.remove('hidden');
+            document.getElementById('option-modal').classList.add('flex');
+        }
+
+        // 關閉彈窗
+        function closeModal() {
+            document.getElementById('option-modal').classList.add('hidden');
+            document.getElementById('option-modal').classList.remove('flex');
+        }
+
         // 加入購物車
-        function addToCart(product) {
-            const existingItem = cart.find(item => item.id === product.id);
+        function addToCart(fullName, price) {
+            const existingItem = cart.find(item => item.name === fullName);
             if (existingItem) {
                 existingItem.quantity += 1;
             } else {
-                cart.push({ ...product, quantity: 1 });
+                cart.push({ name: fullName, price: price, quantity: 1 });
             }
             updateCartUI();
         }
 
         // 變更數量
-        function changeQuantity(id, delta) {
-            const item = cart.find(i => i.id === id);
+        function changeQuantity(name, delta) {
+            const item = cart.find(i => i.name === name);
             if (item) {
                 item.quantity += delta;
                 if (item.quantity <= 0) {
-                    cart = cart.filter(i => i.id !== id);
+                    cart = cart.filter(i => i.name !== name);
                 }
             }
             updateCartUI();
@@ -151,7 +189,7 @@
             const totalPriceElement = document.getElementById('total-price');
             
             if (cart.length === 0) {
-                cartContainer.innerHTML = '<p class="text-gray-400 text-center py-10">尚無點選商品</p>';
+                cartContainer.innerHTML = '<p class="text-gray-400 text-center py-10">尚無點選商品，請由右側點選</p>';
                 totalPriceElement.innerText = 'NT$ 0';
                 return;
             }
@@ -162,16 +200,16 @@
             cart.forEach(item => {
                 total += item.price * item.quantity;
                 const itemRow = document.createElement('div');
-                itemRow.className = 'flex justify-between items-center bg-gray-50 p-2 rounded-lg border border-gray-100';
+                itemRow.className = 'flex justify-between items-center bg-gray-50 p-2 rounded-lg border border-gray-200';
                 itemRow.innerHTML = `
-                    <div class="flex-1">
-                        <h4 class="text-sm font-bold text-gray-800">${item.name}</h4>
-                        <span class="text-xs text-gray-500">NT$ ${item.price} x ${item.quantity}</span>
+                    <div class="flex-1 pr-2">
+                        <h4 class="text-xs font-bold text-gray-800">${item.name}</h4>
+                        <span class="text-xs text-gray-500">NT$ ${item.price}</span>
                     </div>
-                    <div class="flex items-center gap-2">
-                        <button onclick="changeQuantity(${item.id}, -1)" class="w-7 h-7 bg-gray-200 rounded-md font-bold text-gray-600 hover:bg-gray-300">-</button>
-                        <span class="text-sm font-bold w-5 text-center">${item.quantity}</span>
-                        <button onclick="changeQuantity(${item.id}, 1)" class="w-7 h-7 bg-gray-200 rounded-md font-bold text-gray-600 hover:bg-gray-300">+</button>
+                    <div class="flex items-center gap-1">
+                        <button onclick="changeQuantity('${item.name}', -1)" class="w-6 h-6 bg-white border border-gray-300 rounded font-bold hover:bg-gray-100">-</button>
+                        <span class="text-xs font-bold w-6 text-center">${item.quantity}</span>
+                        <button onclick="changeQuantity('${item.name}', 1)" class="w-6 h-6 bg-white border border-gray-300 rounded font-bold hover:bg-gray-100">+</button>
                     </div>
                 `;
                 cartContainer.appendChild(itemRow);
@@ -180,12 +218,8 @@
             totalPriceElement.innerText = `NT$ ${total}`;
         }
 
-        // 結帳動作
         function checkout() {
-            if (cart.length === 0) {
-                alert('目前購物車是空的！');
-                return;
-            }
+            if (cart.length === 0) return alert('目前購物車是空的！');
             alert('結帳成功！總金額：' + document.getElementById('total-price').innerText);
             cart = [];
             updateCartUI();
@@ -193,3 +227,5 @@
     </script>
 </body>
 </html>
+
+
