@@ -86,7 +86,7 @@
             {
                 id: 3, 
                 name: "經典碳烤烏魚子", 
-                image: "大方1.jpg",
+                image: "大方.jpg",
                 specs: [
                     {
                         specName: "5兩",
@@ -238,7 +238,7 @@
                 ]
             },
             { id: 5, name: "雙園禮盒", price: 180, category: "手作", image: "https://via.placeholder.com/150" },
-            { id: 6, name: "烏魚子牛奶糖", price: 280, category: "手作", image: "烏金牛奶糖.jpg" }
+            { id: 6, name: "烏魚子牛奶糖", price: 280, category: "手作", image: "https://via.placeholder.com/150" }
         ];
 
         let cart = []; 
@@ -270,13 +270,14 @@
                     displayPrice = `NT$ ${product.price}`;
                 }
 
+                // 將圖片高度改為 h-36 ~ h-40（或比率縮放），讓卡片整體更加緊湊不拉長
                 card.innerHTML = `
-                    <div class="h-60 bg-gray-100 flex items-center justify-center overflow-hidden">
+                    <div class="h-36 sm:h-40 bg-gray-100 flex items-center justify-center overflow-hidden">
                         <img src="${product.image}" alt="${product.name}" class="w-full h-full object-cover" onerror="this.src='https://via.placeholder.com/300?text=野烏金'">
                     </div>
-                    <div class="p-3 text-center bg-white border-t border-gray-50">
-                        <h3 class="font-bold text-gray-800 text-sm">${product.name}</h3>
-                        <p class="text-indigo-600 font-extrabold text-xs mt-1">${displayPrice}</p>
+                    <div class="p-2 text-center bg-white border-t border-gray-50">
+                        <h3 class="font-bold text-gray-800 text-xs sm:text-sm line-clamp-1">${product.name}</h3>
+                        <p class="text-indigo-600 font-extrabold text-xs mt-0.5">${displayPrice}</p>
                     </div>
                 `;
                 grid.appendChild(card);
