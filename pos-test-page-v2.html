@@ -2,56 +2,62 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>野烏金 POS 系統</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 解決 iPad 瀏覽器 h-screen / 100vh 被網址列遮擋的問題 */
+        .app-height {
+            height: 100vh;
+            height: 100dvh;
+        }
+    </style>
 </head>
-<body class="bg-gray-100 font-sans h-screen overflow-hidden">
-    <div class="flex flex-col h-full">
-        
-        <!-- 💡 頂部狀態欄：門市與值班人員選擇 -->
-        <header class="bg-indigo-900 text-white px-4 py-2 flex justify-between items-center shadow-md z-10 flex-none">
-            <div class="flex items-center gap-2">
-                <span class="text-xl font-bold">🐟 野烏金 POS 系統</span>
+<body class="bg-gray-100 font-sans app-height w-screen overflow-hidden flex flex-col">
+
+    <!-- 💡 頂部狀態欄：門市與值班人員選擇 -->
+    <header class="bg-indigo-900 text-white px-3 py-1.5 flex justify-between items-center shadow-md flex-none">
+        <div class="flex items-center gap-2">
+            <span class="text-sm sm:text-base font-bold">🐟 野烏金 POS 系統</span>
+        </div>
+        <div class="flex items-center gap-2 text-xs">
+            <div class="flex items-center gap-1">
+                <label class="font-bold text-indigo-200">門市：</label>
+                <select id="store-select" class="bg-indigo-800 text-white font-bold rounded px-1.5 py-0.5 outline-none border border-indigo-700">
+                    <option value="高雄總部">高雄總部</option>
+                    <option value="台中門市">台中門市</option>
+                </select>
             </div>
-            <div class="flex items-center gap-4 text-sm">
-                <div class="flex items-center gap-1">
-                    <label class="font-bold text-indigo-200">門市：</label>
-                    <select id="store-select" class="bg-indigo-800 text-white font-bold rounded px-2 py-1 outline-none border border-indigo-700">
-                        <option value="高雄總部">高雄總部</option>
-                        <option value="台中門市">台中門市</option>
-                    </select>
-                </div>
-                <div class="flex items-center gap-1">
-                    <label class="font-bold text-indigo-200">服務人員：</label>
-                    <select id="staff-select" class="bg-indigo-800 text-white font-bold rounded px-2 py-1 outline-none border border-indigo-700">
-                        <option value="店長">店長</option>
-                        <option value="人員A">人員 A</option>
-                        <option value="人員B">人員 B</option>
-                    </select>
-                </div>
+            <div class="flex items-center gap-1">
+                <label class="font-bold text-indigo-200">人員：</label>
+                <select id="staff-select" class="bg-indigo-800 text-white font-bold rounded px-1.5 py-0.5 outline-none border border-indigo-700">
+                    <option value="店長">店長</option>
+                    <option value="人員A">人員 A</option>
+                    <option value="人員B">人員 B</option>
+                </select>
             </div>
-        </header>
+        </div>
+    </header>
 
     <!-- 主要內容區 (左購物車 40% + 右商品 60%) -->
-    <div class="flex flex-1 overflow-hidden">
+    <div class="flex flex-1 overflow-hidden min-h-0">
         
         <!-- 左側：購物車區 (40%) -->
-        <div class="w-2/5 bg-white border-r border-gray-200 flex flex-col p-3 shadow-md h-full overflow-hidden">
+        <div class="w-2/5 bg-white border-r border-gray-200 flex flex-col p-2.5 shadow-md h-full overflow-hidden">
             
-            <!-- 上半部：購物車標題與滾動清單 -->
-            <div class="flex justify-between items-center pb-1.5 border-b border-gray-100 flex-none">
+            <!-- 上半部：購物車標題 -->
+            <div class="flex justify-between items-center pb-1 border-b border-gray-100 flex-none">
                 <h2 class="text-xs font-bold text-gray-700">目前點選清單</h2>
                 <button onclick="clearCart()" class="text-xs text-red-500 font-bold hover:underline">清空</button>
             </div>
 
-            <!-- 🛒 購物車商品清單 (彈性縮放，超過會捲動) -->
+            <!-- 🛒 購物車商品清單 (設為 min-h-0 讓中間空白彈性縮小，確保底部不被推出螢幕) -->
             <div id="cart-items" class="flex-1 overflow-y-auto space-y-1.5 py-1.5 pr-1 min-h-0">
-                <p class="text-gray-400 text-center py-6 text-xs">尚無點選商品，請由右側點選</p>
+                <p class="text-gray-400 text-center py-4 text-xs">尚無點選商品，請由右側點選</p>
             </div>
 
-            <!-- 🔒 核心修正：緊湊版折扣與結帳控制區（確保平板不被切掉） -->
-            <div class="border-t border-gray-200 pt-2 flex-none space-y-1.5 bg-white">
+            <!-- 🔒 核心修正：固定在底部的結帳區域 -->
+            <div class="border-t border-gray-200 pt-1.5 flex-none space-y-1 bg-white">
                 
                 <!-- 折扣設定列 -->
                 <div class="bg-gray-50 p-1.5 rounded-lg border border-gray-200 flex items-center justify-between gap-1">
@@ -67,7 +73,7 @@
                 </div>
 
                 <!-- 金額統計明細 -->
-                <div class="space-y-0.5 text-xs">
+                <div class="space-y-0.5 text-xs py-0.5">
                     <div class="flex justify-between items-center text-gray-500">
                         <span>商品小計：</span>
                         <span id="subtotal-price">NT$ 0</span>
@@ -76,22 +82,22 @@
                         <span>折扣折抵：</span>
                         <span id="discount-amount">- NT$ 0</span>
                     </div>
-                    <div class="flex justify-between items-center pt-1 border-t border-gray-100">
-                        <span class="font-bold text-gray-800 text-sm">應付總額：</span>
-                        <span id="total-price" class="text-xl font-extrabold text-red-600">NT$ 0</span>
+                    <div class="flex justify-between items-center pt-0.5 border-t border-gray-100">
+                        <span class="font-bold text-gray-800 text-xs">應付總額：</span>
+                        <span id="total-price" class="text-lg font-extrabold text-red-600">NT$ 0</span>
                     </div>
                 </div>
 
                 <!-- 🎯 提交銷售單按鈕 -->
-                <button onclick="checkout()" class="w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold py-2 rounded-xl text-base shadow transition">
+                <button onclick="checkout()" class="w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold py-2 rounded-xl text-sm shadow transition">
                     提交銷售單
                 </button>
             </div>
         </div>
 
         <!-- 右側：商品卡片網格 (60%) -->
-        <div class="w-3/5 flex flex-col p-3 bg-gray-50 h-full overflow-hidden">
-            <div id="product-grid" class="grid grid-cols-3 gap-2.5 overflow-y-auto p-0.5 h-full content-start items-start">
+        <div class="w-3/5 flex flex-col p-2.5 bg-gray-50 h-full overflow-hidden">
+            <div id="product-grid" class="grid grid-cols-3 gap-2 overflow-y-auto p-0.5 h-full content-start items-start">
             </div>
         </div>
     </div>
