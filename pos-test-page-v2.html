@@ -104,14 +104,15 @@
                     : `NT$ ${product.price}`;
 
                 card.innerHTML = `
-                    <div class="h-60 bg-gray-100 flex items-center justify-center overflow-hidden"">
-                        <img src="${product.image}" alt="${product.name}" class="w-full h-full object-cover" onerror="this.src='https://via.placeholder.com/150?text=野烏金'">
-                    </div>
-                    <div class="p-2 text-center">
-                        <h3 class="font-bold text-gray-800 text-sm">${product.name}</h3>
-                        <p class="text-indigo-600 font-extrabold text-xs mt-1">${displayPrice}</p>
-                    </div>
-                `;
+                    <!-- 把 h-28 改成 h-60，讓圖片放大填滿空白 -->
+            <div class="h-60 bg-gray-100 flex items-center justify-center overflow-hidden">
+                <img src="${product.image}" alt="${product.name}" class="w-full h-full object-cover" onerror="this.src='https://via.placeholder.com/300?text=野烏金'">
+            </div>
+            <div class="p-3 text-center bg-white border-t border-gray-50">
+                <h3 class="font-bold text-gray-800 text-sm">${product.name}</h3>
+                <p class="text-indigo-600 font-extrabold text-xs mt-1">${displayPrice}</p>
+            </div>
+        `;
                 grid.appendChild(card);
             });
         }
