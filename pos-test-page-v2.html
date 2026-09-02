@@ -58,6 +58,20 @@
     <script>
         // 模擬商品資料庫（可替換成您的真實商品與圖片網址）
         const products = [
+            { 
+                id: 1, 
+                name: "經典一口吃", 
+                image: "https://raw.githubusercontent.com/food8469/janus-kings-pos/6a1c006b61c52e81e5f830d2b05eadc49de96253/%E5%A4%A7%E5%9C%93.jpg",
+                // 設有 options 規格選單
+                options: [
+                    { name: "鹽味", price: 1280 },
+                    { name: "紅酒", price: 1280 },
+                    { name: "味噌", price: 1380 },
+                    { name: "香辣", price: 1380 },
+                    { name: "花雕", price: 1380 }
+                ]
+            },
+            {
             { id: 1, name: "經典一口吃", price: 1280, category: "烏魚子", image: "https://raw.githubusercontent.com/food8469/janus-kings-pos/6a1c006b61c52e81e5f830d2b05eadc49de96253/%E5%A4%A7%E5%9C%93.jpg" },
             { id: 2, name: "特殊口味一口吃", price: 1580, category: "烏魚子", image: "https://raw.githubusercontent.com/food8469/janus-kings-pos/6a1c006b61c52e81e5f830d2b05eadc49de96253/%E5%A4%A7%E5%9C%93.jpg" },
             { id: 3, name: "經典碳烤烏魚子", price: 1380, category: "禮盒", image: "https://raw.githubusercontent.com/food8469/janus-kings-pos/6016b5b02748f3fa011711f76bd9aba4bae51700/%E5%A4%A7%E6%96%B91.jpg" },
