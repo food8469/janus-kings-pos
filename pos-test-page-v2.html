@@ -34,32 +34,30 @@
         </header>
 
     <!-- 主要內容區 (左購物車 40% + 右商品 60%) -->
-    <div class="flex flex-1 overflow-hidden h-[calc(100vh-3rem)]">
+    <div class="flex flex-1 overflow-hidden">
         
         <!-- 左側：購物車區 (40%) -->
-        <div class="w-2/5 bg-white border-r border-gray-200 flex flex-col justify-between p-3 shadow-md h-full overflow-hidden">
+        <div class="w-2/5 bg-white border-r border-gray-200 flex flex-col p-3 shadow-md h-full overflow-hidden">
             
             <!-- 上半部：購物車標題與滾動清單 -->
-            <div class="flex flex-col flex-1 min-h-0 overflow-hidden">
-                <div class="flex justify-between items-center pb-2 border-b border-gray-100 flex-none">
-                    <h2 class="text-sm font-bold text-gray-700">目前點選清單</h2>
-                    <button onclick="clearCart()" class="text-xs text-red-500 font-bold hover:underline">清空</button>
-                </div>
-
-                <!-- 🛒 購物車商品清單 (設定獨立滾動) -->
-                <div id="cart-items" class="flex-1 overflow-y-auto space-y-2 pr-1 py-2">
-                    <p class="text-gray-400 text-center py-10 text-xs">尚無點選商品，請由右側點選</p>
-                </div>
+            <div class="flex justify-between items-center pb-1.5 border-b border-gray-100 flex-none">
+                <h2 class="text-xs font-bold text-gray-700">目前點選清單</h2>
+                <button onclick="clearCart()" class="text-xs text-red-500 font-bold hover:underline">清空</button>
             </div>
 
-            <!-- 🔒 核心修正：固定在底部的折扣與結帳按鈕區塊 -->
-            <div class="border-t border-gray-200 pt-2 flex-none space-y-2 bg-white">
+            <!-- 🛒 購物車商品清單 (彈性縮放，超過會捲動) -->
+            <div id="cart-items" class="flex-1 overflow-y-auto space-y-1.5 py-1.5 pr-1 min-h-0">
+                <p class="text-gray-400 text-center py-6 text-xs">尚無點選商品，請由右側點選</p>
+            </div>
+
+            <!-- 🔒 核心修正：緊湊版折扣與結帳控制區（確保平板不被切掉） -->
+            <div class="border-t border-gray-200 pt-2 flex-none space-y-1.5 bg-white">
                 
                 <!-- 折扣設定列 -->
-                <div class="bg-gray-50 p-2 rounded-lg border border-gray-200 flex items-center justify-between gap-2">
+                <div class="bg-gray-50 p-1.5 rounded-lg border border-gray-200 flex items-center justify-between gap-1">
                     <span class="text-xs font-bold text-gray-600 flex-none">折扣：</span>
                     <select id="discount-select" onchange="updateCartUI()" class="text-xs border border-gray-300 rounded p-1 font-bold text-gray-700 bg-white flex-1 outline-none">
-                        <option value="none">原價</option>
+                        <option value="none">原價 (無折扣)</option>
                         <option value="0.95">95 折</option>
                         <option value="0.9">9 折</option>
                         <option value="0.85">85 折</option>
@@ -68,24 +66,24 @@
                     <input id="custom-discount-amount" type="number" placeholder="金額" oninput="updateCartUI()" class="hidden w-16 text-xs border border-gray-300 rounded p-1 font-bold text-red-600 outline-none">
                 </div>
 
-                <!-- 金額統計 -->
-                <div class="space-y-0.5">
-                    <div class="flex justify-between items-center text-xs text-gray-500">
-                        <span>小計：</span>
+                <!-- 金額統計明細 -->
+                <div class="space-y-0.5 text-xs">
+                    <div class="flex justify-between items-center text-gray-500">
+                        <span>商品小計：</span>
                         <span id="subtotal-price">NT$ 0</span>
                     </div>
-                    <div id="discount-row" class="flex justify-between items-center text-xs text-green-600 hidden">
+                    <div id="discount-row" class="flex justify-between items-center text-green-600 hidden">
                         <span>折扣折抵：</span>
                         <span id="discount-amount">- NT$ 0</span>
                     </div>
                     <div class="flex justify-between items-center pt-1 border-t border-gray-100">
-                        <span class="text-sm font-bold text-gray-800">總計金額：</span>
+                        <span class="font-bold text-gray-800 text-sm">應付總額：</span>
                         <span id="total-price" class="text-xl font-extrabold text-red-600">NT$ 0</span>
                     </div>
                 </div>
 
-                <!-- 🎯 提交銷售單按鈕 (永遠固定可見) -->
-                <button onclick="checkout()" class="w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold py-2.5 rounded-xl text-base shadow transition">
+                <!-- 🎯 提交銷售單按鈕 -->
+                <button onclick="checkout()" class="w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold py-2 rounded-xl text-base shadow transition">
                     提交銷售單
                 </button>
             </div>
