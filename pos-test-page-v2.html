@@ -270,18 +270,20 @@
                     displayPrice = `NT$ ${product.price}`;
                 }
 
-                // 💡 移除固定 h-12，改用 py-2 flex-col 自然擴充高度，保證品名 100% 完整顯示！
+                // 💡 調整重點：
+                // 1. 圖片比例改為 aspect-[16/10]，讓圖片區稍扁一點，釋放出更多垂直空間給文字。
+                // 2. 文字容器改為 p-3 徹底移除固定高度限制，設定 leading-normal 與 py-2，讓字體就算寫兩列也有充裕空間，絕不被切下半截！
                 card.innerHTML = `
-                    <div class="w-full aspect-[4/3] bg-amber-50 flex items-center justify-center overflow-hidden relative">
+                    <div class="w-full aspect-[16/10] bg-amber-50 flex items-center justify-center overflow-hidden relative">
                         <img src="${product.image}" alt="${product.name}" class="w-full h-full object-cover" 
                              onerror="this.style.display='none'; this.nextElementSibling.classList.remove('hidden');">
                         <div class="hidden absolute inset-0 flex items-center justify-center bg-amber-100/60 p-2 text-center">
                             <span class="text-amber-900 font-bold text-xs">${product.name}</span>
                         </div>
                     </div>
-                    <div class="px-2 py-2 text-center bg-white border-t border-gray-100 flex flex-col justify-center items-center">
-                        <h3 class="font-bold text-gray-800 text-xs sm:text-sm leading-tight">${product.name}</h3>
-                        <p class="text-indigo-600 font-extrabold text-xs mt-1">${displayPrice}</p>
+                    <div class="p-3 text-center bg-white border-t border-gray-100 flex flex-col justify-center items-center">
+                        <h3 class="font-bold text-gray-800 text-xs sm:text-sm leading-normal">${product.name}</h3>
+                        <p class="text-indigo-600 font-extrabold text-xs mt-1.5">${displayPrice}</p>
                     </div>
                 `;
                 grid.appendChild(card);
