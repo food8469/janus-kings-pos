@@ -33,49 +33,81 @@
             </div>
         </header>
 
-    <div class="flex h-full">
+    <!-- 主要內容區 (左購物車 40% + 右商品 60%) -->
+    <div class="flex flex-1 overflow-hidden h-[calc(100vh-3rem)]">
+        
         <!-- 左側：購物車區 (40%) -->
-        <div class="w-2/5 bg-white border-r border-gray-200 flex flex-col justify-between p-4 shadow-md h-full">
-            <div class="flex flex-col h-full overflow-hidden">
-                <h1 class="text-2xl font-bold text-gray-800 mb-2">🐟 野烏金 POS</h1>
-                <p class="text-sm font-bold text-gray-700 mb-2">目前點選清單</p>
+        <div class="w-2/5 bg-white border-r border-gray-200 flex flex-col justify-between p-3 shadow-md h-full overflow-hidden">
+            
+            <!-- 上半部：購物車標題與滾動清單 -->
+            <div class="flex flex-col flex-1 min-h-0 overflow-hidden">
+                <div class="flex justify-between items-center pb-2 border-b border-gray-100 flex-none">
+                    <h2 class="text-sm font-bold text-gray-700">目前點選清單</h2>
+                    <button onclick="clearCart()" class="text-xs text-red-500 font-bold hover:underline">清空</button>
+                </div>
 
-                <!-- 購物車清單 -->
-                <div id="cart-items" class="flex-1 overflow-y-auto space-y-2 pr-1 my-2">
-                    <p class="text-gray-400 text-center py-10">尚無點選商品，請由右側點選</p>
+                <!-- 🛒 購物車商品清單 (設定獨立滾動) -->
+                <div id="cart-items" class="flex-1 overflow-y-auto space-y-2 pr-1 py-2">
+                    <p class="text-gray-400 text-center py-10 text-xs">尚無點選商品，請由右側點選</p>
                 </div>
             </div>
 
-            <!-- 結帳總金額與按鈕 -->
-            <div class="border-t pt-3 mt-auto">
-                <div class="flex justify-between items-center mb-3">
-                    <span class="text-lg font-bold text-gray-700">總計金額：</span>
-                    <span id="total-price" class="text-2xl font-extrabold text-red-600">NT$ 0</span>
+            <!-- 🔒 核心修正：固定在底部的折扣與結帳按鈕區塊 -->
+            <div class="border-t border-gray-200 pt-2 flex-none space-y-2 bg-white">
+                
+                <!-- 折扣設定列 -->
+                <div class="bg-gray-50 p-2 rounded-lg border border-gray-200 flex items-center justify-between gap-2">
+                    <span class="text-xs font-bold text-gray-600 flex-none">折扣：</span>
+                    <select id="discount-select" onchange="updateCartUI()" class="text-xs border border-gray-300 rounded p-1 font-bold text-gray-700 bg-white flex-1 outline-none">
+                        <option value="none">原價</option>
+                        <option value="0.95">95 折</option>
+                        <option value="0.9">9 折</option>
+                        <option value="0.85">85 折</option>
+                        <option value="custom-minus">手動折抵金額</option>
+                    </select>
+                    <input id="custom-discount-amount" type="number" placeholder="金額" oninput="updateCartUI()" class="hidden w-16 text-xs border border-gray-300 rounded p-1 font-bold text-red-600 outline-none">
                 </div>
-                <button onclick="checkout()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl text-lg shadow transition">
+
+                <!-- 金額統計 -->
+                <div class="space-y-0.5">
+                    <div class="flex justify-between items-center text-xs text-gray-500">
+                        <span>小計：</span>
+                        <span id="subtotal-price">NT$ 0</span>
+                    </div>
+                    <div id="discount-row" class="flex justify-between items-center text-xs text-green-600 hidden">
+                        <span>折扣折抵：</span>
+                        <span id="discount-amount">- NT$ 0</span>
+                    </div>
+                    <div class="flex justify-between items-center pt-1 border-t border-gray-100">
+                        <span class="text-sm font-bold text-gray-800">總計金額：</span>
+                        <span id="total-price" class="text-xl font-extrabold text-red-600">NT$ 0</span>
+                    </div>
+                </div>
+
+                <!-- 🎯 提交銷售單按鈕 (永遠固定可見) -->
+                <button onclick="checkout()" class="w-full bg-indigo-600 hover:bg-indigo-700 active:bg-indigo-800 text-white font-bold py-2.5 rounded-xl text-base shadow transition">
                     提交銷售單
                 </button>
             </div>
         </div>
 
         <!-- 右側：商品卡片網格 (60%) -->
-        <div class="w-3/5 flex flex-col p-4 bg-gray-50 h-full overflow-hidden">
-            <div id="product-grid" class="grid grid-cols-3 gap-3 overflow-y-auto p-1 h-full content-start items-start">
+        <div class="w-3/5 flex flex-col p-3 bg-gray-50 h-full overflow-hidden">
+            <div id="product-grid" class="grid grid-cols-3 gap-2.5 overflow-y-auto p-0.5 h-full content-start items-start">
             </div>
         </div>
     </div>
 
     <!-- 💡 規格與口味選擇彈窗 (Modal) -->
     <div id="option-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center p-4 z-50">
-        <div class="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <h3 id="modal-product-name" class="text-lg font-bold text-gray-800 border-b pb-2">選擇商品規格</h3>
+        <div class="bg-white rounded-2xl max-w-md w-full p-5 shadow-2xl space-y-4">
+            <h3 id="modal-product-name" class="text-base font-bold text-gray-800 border-b pb-2">選擇商品規格</h3>
             
-            <div id="modal-content" class="space-y-4">
-            </div>
+            <div id="modal-content" class="space-y-3"></div>
 
             <div class="flex justify-end gap-2 pt-2 border-t">
-                <button onclick="closeModal()" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-300">取消</button>
-                <button id="modal-confirm-btn" onclick="confirmSpecAddToCart()" class="px-5 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold hover:bg-indigo-700 hidden">確定加入</button>
+                <button onclick="closeModal()" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-xs font-bold hover:bg-gray-300">取消</button>
+                <button id="modal-confirm-btn" onclick="confirmSpecAddToCart()" class="px-5 py-2 bg-indigo-600 text-white rounded-lg text-xs font-bold hover:bg-indigo-700 hidden">確定加入</button>
             </div>
         </div>
     </div>
