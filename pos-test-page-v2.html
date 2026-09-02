@@ -35,7 +35,7 @@
 
         <!-- 右側：商品卡片網格 (60%) -->
         <div class="w-3/5 flex flex-col p-4 bg-gray-50 h-full overflow-hidden">
-            <div id="product-grid" class="grid grid-cols-2 md:grid-cols-3 gap-3 overflow-y-auto p-1 flex-1">
+            <div id="product-grid" class="grid grid-cols-2 md:grid-cols-3 gap-3 overflow-y-auto p-1 h-full align-start">
             </div>
         </div>
     </div>
@@ -258,7 +258,8 @@
             
             products.forEach(product => {
                 const card = document.createElement('div');
-                card.className = 'bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden cursor-pointer hover:shadow-md transition flex flex-col justify-between active:scale-95 duration-150';
+                // 專為平板設計：縮小 Padding，改為微型卡片風格
+                card.className = 'bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden cursor-pointer hover:shadow-md transition flex flex-col active:scale-95 duration-150 h-fit';
                 card.onclick = () => handleProductClick(product);
                 
                 let displayPrice = "";
@@ -270,13 +271,13 @@
                     displayPrice = `NT$ ${product.price}`;
                 }
 
-                // 將圖片高度改為 h-36 ~ h-40（或比率縮放），讓卡片整體更加緊湊不拉長
+                // 圖片高度改為限制最大 h-28 或 h-32，確保品名與價格 100% 空間足夠不被裁切
                 card.innerHTML = `
-                    <div class="h-36 sm:h-40 bg-gray-100 flex items-center justify-center overflow-hidden">
+                    <div class="h-28 sm:h-32 bg-gray-100 flex items-center justify-center overflow-hidden">
                         <img src="${product.image}" alt="${product.name}" class="w-full h-full object-cover" onerror="this.src='https://via.placeholder.com/300?text=野烏金'">
                     </div>
-                    <div class="p-2 text-center bg-white border-t border-gray-50">
-                        <h3 class="font-bold text-gray-800 text-xs sm:text-sm line-clamp-1">${product.name}</h3>
+                    <div class="p-2 text-center bg-white border-t border-gray-50 flex flex-col justify-center">
+                        <h3 class="font-bold text-gray-800 text-xs sm:text-sm truncate">${product.name}</h3>
                         <p class="text-indigo-600 font-extrabold text-xs mt-0.5">${displayPrice}</p>
                     </div>
                 `;
