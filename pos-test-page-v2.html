@@ -4,55 +4,59 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>野烏金 POS 系統</title>
-    <!-- 引入 Tailwind CSS 快速排版 -->
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-100 font-sans">
+<body class="bg-gray-100 font-sans h-screen overflow-hidden">
 
-    <div class="flex h-screen overflow-hidden">
-        
-        <!-- 左側：購物車與結帳區 (佔 40%) -->
-        <div class="w-2/5 bg-white border-r border-gray-200 flex flex-col justify-between p-4 shadow-md">
-            <div>
+    <div class="flex h-full">
+        <!-- 左側：購物車區 (40%) -->
+        <div class="w-2/5 bg-white border-r border-gray-200 flex flex-col justify-between p-4 shadow-md h-full">
+            <div class="flex flex-col h-full overflow-hidden">
                 <h1 class="text-2xl font-bold text-gray-800 mb-2">🐟 野烏金 POS</h1>
-                <p class="text-sm text-gray-500 mb-4">目前結帳清單</p>
-                
-                <!-- 購物車清單區 -->
-                <div id="cart-items" class="overflow-y-auto max-h-[55vh] space-y-3 pr-1">
-                    <p class="text-gray-400 text-center py-10">尚無點選商品</p>
+                <p class="text-sm font-bold text-gray-700 mb-2">目前點選清單</p>
+
+                <!-- 購物車清單 -->
+                <div id="cart-items" class="flex-1 overflow-y-auto space-y-2 pr-1 my-2">
+                    <p class="text-gray-400 text-center py-10">尚無點選商品，請由右側點選</p>
                 </div>
             </div>
 
             <!-- 結帳總金額與按鈕 -->
-            <div class="border-t pt-4">
-                <div class="flex justify-between items-center mb-4">
+            <div class="border-t pt-3 mt-auto">
+                <div class="flex justify-between items-center mb-3">
                     <span class="text-lg font-bold text-gray-700">總計金額：</span>
                     <span id="total-price" class="text-2xl font-extrabold text-red-600">NT$ 0</span>
                 </div>
-                <button onclick="checkout()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl text-lg shadow transition">
-                    確認結帳
+                <button onclick="checkout()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 rounded-xl text-lg shadow transition">
+                    提交銷售單
                 </button>
             </div>
         </div>
- 
-        <!-- 右側：商品圖文按鈕區 (佔 60%) -->
-        <div class="w-3/5 flex flex-col p-4 bg-gray-50 overflow-hidden">
-            
-            <!-- 分類標籤列 -->
-            <div id="category-tabs" class="flex gap-2 mb-4 overflow-x-auto pb-2">
-                <button onclick="filterCategory('all')" class="category-btn px-4 py-2 bg-blue-600 text-white font-medium rounded-lg shadow-sm whitespace-nowrap">全部商品</button>
-                <button onclick="filterCategory('烏魚子')" class="category-btn px-4 py-2 bg-white text-gray-700 border border-gray-300 font-medium rounded-lg shadow-sm whitespace-nowrap">烏魚子系列</button>
-                <button onclick="filterCategory('禮盒')" class="category-btn px-4 py-2 bg-white text-gray-700 border border-gray-300 font-medium rounded-lg shadow-sm whitespace-nowrap">精美禮盒</button>
-                <button onclick="filterCategory('手作')" class="category-btn px-4 py-2 bg-white text-gray-700 border border-gray-300 font-medium rounded-lg shadow-sm whitespace-nowrap">手作料理</button>
-            </div>
 
-            <!-- 商品圖文網格 -->
-            <div id="product-grid" class="grid grid-cols-3 gap-4 overflow-y-auto p-1">
-                <!-- 商品會透過 JavaScript 自動渲染進來 -->
+        <!-- 右側：商品卡片網格 (60%) -->
+        <div class="w-3/5 flex flex-col p-4 bg-gray-50 h-full overflow-hidden">
+            <div id="product-grid" class="grid grid-cols-2 md:grid-cols-3 gap-3 overflow-y-auto p-1 flex-1">
+                <!-- 商品自動渲染區 -->
             </div>
         </div>
- 
     </div>
+
+    <!-- 💡 規格選擇彈窗 (Modal) -->
+    <div id="option-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-2xl max-w-sm w-full p-5 shadow-2xl space-y-4">
+            <h3 id="modal-product-name" class="text-lg font-bold text-gray-800">選擇商品規格</h3>
+            
+            <!-- 選項按鈕區 -->
+            <div id="modal-options" class="grid grid-cols-2 gap-2">
+                <!-- 規格動態加入 -->
+            </div>
+
+            <div class="flex justify-end pt-2">
+                <button onclick="closeModal()" class="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg text-sm font-bold hover:bg-gray-300">取消</button>
+            </div>
+        </div>
+    </div>
+    
  
     <!-- JavaScript 邏輯 -->
     <script>
@@ -70,9 +74,7 @@
                     { name: "香辣", price: 1380 },
                     { name: "花雕", price: 1380 }
                 ]
-            },
-            {
-            { id: 1, name: "經典一口吃", price: 1280, category: "烏魚子", image: "https://raw.githubusercontent.com/food8469/janus-kings-pos/6a1c006b61c52e81e5f830d2b05eadc49de96253/%E5%A4%A7%E5%9C%93.jpg" },
+            } 
             { id: 2, name: "特殊口味一口吃", price: 1580, category: "烏魚子", image: "https://raw.githubusercontent.com/food8469/janus-kings-pos/6a1c006b61c52e81e5f830d2b05eadc49de96253/%E5%A4%A7%E5%9C%93.jpg" },
             { id: 3, name: "經典碳烤烏魚子", price: 1380, category: "禮盒", image: "https://raw.githubusercontent.com/food8469/janus-kings-pos/6016b5b02748f3fa011711f76bd9aba4bae51700/%E5%A4%A7%E6%96%B91.jpg" },
             { id: 4, name: "特殊口味碳烤烏魚子", price: 1680, category: "手作", image: "https://raw.githubusercontent.com/food8469/janus-kings-pos/6016b5b02748f3fa011711f76bd9aba4bae51700/%E5%A4%A7%E6%96%B91.jpg" },
