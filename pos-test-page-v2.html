@@ -37,28 +37,28 @@
                 </select>
             </div>
 
-            <!-- 🍔 右上角漢堡選單按鈕 -->
-            <button onclick="toggleMenu()" class="bg-indigo-800 hover:bg-indigo-700 active:bg-indigo-600 text-white px-3 py-1 rounded-lg border border-indigo-600 font-bold text-base flex items-center justify-center transition shadow-sm">
-                ☰
+     <!-- 🍔 右上角漢堡選單按鈕 -->
+            <button id="hamburger-btn" onclick="toggleMenu()" class="bg-indigo-800 hover:bg-indigo-700 active:bg-indigo-600 text-white px-3 py-1 rounded-lg border border-indigo-600 font-bold text-base flex items-center justify-center transition shadow-sm">
+             ☰
             </button>
         </div>
     </header>
 
-    <!-- 💡 右上角彈出式選單 (已修復點擊顯現邏輯) -->
-    <div id="dropdown-menu" class="fixed top-12 right-3 bg-white text-gray-800 shadow-2xl rounded-2xl border border-gray-200 w-52 hidden flex-col overflow-hidden z-50">
-        <div class="bg-indigo-50 px-4 py-2 border-b border-indigo-100 text-xs font-bold text-indigo-800">
-            系統頁面切換
-        </div>
-        <button onclick="switchTab('pos')" class="px-4 py-3 text-left hover:bg-gray-100 font-bold text-xs flex items-center gap-2 border-b border-gray-100 transition">
-            <span class="text-base">🛒</span> 點餐收銀畫面
-        </button>
-        <button onclick="switchTab('stock')" class="px-4 py-3 text-left hover:bg-gray-100 font-bold text-xs flex items-center gap-2 border-b border-gray-100 transition">
-            <span class="text-base">📦</span> 庫存管理
-        </button>
-        <button onclick="switchTab('orders')" class="px-4 py-3 text-left hover:bg-gray-100 font-bold text-xs flex items-center gap-2 transition">
-            <span class="text-base">📊</span> 當日銷售紀錄
-        </button>
+    <!-- 💡 右上角彈出式選單 -->
+<div id="dropdown-menu" class="fixed top-12 right-3 bg-white text-gray-800 shadow-2xl rounded-2xl border border-gray-200 w-52 flex-col overflow-hidden z-50 transition-all duration-200 opacity-0 pointer-events-none transform -translate-y-2">
+    <div class="bg-indigo-50 px-4 py-2 border-b border-indigo-100 text-xs font-bold text-indigo-800">
+        系統頁面切換
     </div>
+    <button onclick="switchTab('pos')" class="px-4 py-3 text-left hover:bg-gray-100 font-bold text-xs flex items-center gap-2 border-b border-gray-100 transition">
+        <span class="text-base">🛒</span> 點餐收銀畫面
+    </button>
+    <button onclick="switchTab('stock')" class="px-4 py-3 text-left hover:bg-gray-100 font-bold text-xs flex items-center gap-2 border-b border-gray-100 transition">
+        <span class="text-base">📦</span> 庫存管理
+    </button>
+    <button onclick="switchTab('orders')" class="px-4 py-3 text-left hover:bg-gray-100 font-bold text-xs flex items-center gap-2 transition">
+        <span class="text-base">📊</span> 當日銷售紀錄
+    </button>
+</div>
 
     <!-- 主要內容區域：主畫面 (左購物車 40% + 右商品 60%) -->
     <div class="flex flex-1 overflow-hidden min-h-0 relative">
