@@ -35,7 +35,6 @@
 
         <!-- 右側：商品卡片網格 (60%) -->
         <div class="w-3/5 flex flex-col p-4 bg-gray-50 h-full overflow-hidden">
-            <!-- 💡 加上 flex-none content-start，確保卡片緊密向上靠攏，不會被拉開 -->
             <div id="product-grid" class="grid grid-cols-3 gap-3 overflow-y-auto p-1 h-full content-start items-start">
             </div>
         </div>
@@ -87,7 +86,7 @@
             {
                 id: 3, 
                 name: "經典碳烤烏魚子", 
-                image: "大方1.jpg",
+                image: "大方.jpg",
                 specs: [
                     {
                         specName: "5兩",
@@ -239,7 +238,7 @@
                 ]
             },
             { id: 5, name: "雙園禮盒", price: 180, category: "手作", image: "雙園禮盒.jpg" },
-            { id: 6, name: "烏魚子牛奶糖", price: 280, category: "手作", image: "烏金牛奶糖.jpg" }
+            { id: 6, name: "烏魚子牛奶糖", price: 280, category: "手作", image: "烏魚子牛奶糖.jpg" }
         ];
 
         let cart = []; 
@@ -271,7 +270,7 @@
                     displayPrice = `NT$ ${product.price}`;
                 }
 
-                // 💡 圖片載入失敗時，直接換成質感簡約的純色背景＋商品名稱，不會顯示藍色破圖問號
+                // 💡 移除固定 h-12，改用 py-2 flex-col 自然擴充高度，保證品名 100% 完整顯示！
                 card.innerHTML = `
                     <div class="w-full aspect-[4/3] bg-amber-50 flex items-center justify-center overflow-hidden relative">
                         <img src="${product.image}" alt="${product.name}" class="w-full h-full object-cover" 
@@ -280,9 +279,9 @@
                             <span class="text-amber-900 font-bold text-xs">${product.name}</span>
                         </div>
                     </div>
-                    <div class="p-2 text-center bg-white border-t border-gray-100 flex flex-col justify-center h-12">
-                        <h3 class="font-bold text-gray-800 text-xs sm:text-sm truncate">${product.name}</h3>
-                        <p class="text-indigo-600 font-extrabold text-xs mt-0.5">${displayPrice}</p>
+                    <div class="px-2 py-2 text-center bg-white border-t border-gray-100 flex flex-col justify-center items-center">
+                        <h3 class="font-bold text-gray-800 text-xs sm:text-sm leading-tight">${product.name}</h3>
+                        <p class="text-indigo-600 font-extrabold text-xs mt-1">${displayPrice}</p>
                     </div>
                 `;
                 grid.appendChild(card);
