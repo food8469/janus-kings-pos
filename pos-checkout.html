@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>野烏金 POS - 前台結帳</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft JhengHei', sans-serif; background: #f5f5f5; display: flex; min-height: 100vh; }
+        .left { flex: 2; background: white; padding: 20px; overflow-y: auto; }
+        .right { flex: 1; background: #f9f9f9; padding: 20px; border-left: 2px solid #ddd; display: flex; flex-direction: column; }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        .header h1 { font-size: 24px; margin-bottom: 10px; }
+        .product-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px; }
+        .product-card { background: white; border: 2px solid #ddd; border-radius: 8px; padding: 15px; cursor: pointer; transition: all 0.3s; text-align: center; }
+        .product-card:hover { border-color: #667eea; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2); }
+        .product-card.selected { border-color: #667eea; background: #f0f4ff; }
+        .product-name { font-weight: 600; margin: 10px 0 5px; font-size: 14px; }
+        .product-price { color: #667eea; font-size: 16px; font-weight: bold; }
+        .product-stock { font-size: 12px; color: #999; margin-top: 5px; }
+        .cart-item { background: white; padding: 12px; border-radius: 6px; margin: 8px 0; display: flex; justify-content: space-between; align-items: center; }
+        .cart-item-info { flex: 1; }
+        .cart-item-name { font-weight: 600; font-size: 14px; }
+        .cart-item-qty { font-size: 12px; color: #999; }
+        .cart-item-total { font-weight: bold; color: #667eea; }
+        .remove-btn { background: #ff6b6b; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
+        .qty-input { width: 60px; padding: 5px; border: 1px solid #ddd; border-radius: 4px; text-align: center; }
+        .summary { background: white; padding: 15px; border-radius: 6px; margin-top: auto; }
+        .summary-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; }
+        .summary-row.total { border-bottom: none; font-size: 18px; font-weight: bold; color: #667eea; }
+        .checkout-form { margin-top: 15px; }
+        .form-group { margin-bottom: 12px; }
+        label { display: block; font-size: 12px; margin-bottom: 4px; color: #333; }
+        input, select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 13px; }
+        .checkout-btn { width: 100%; padding: 15px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-radius: 6px; font-size: 16px; font-weight: bold; cursor: pointer; margin-top: 10px; }
+        .checkout-btn:hover { opacity: 0.9; }
+        .checkout-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .message { padding: 10px; border-radius: 4px; margin-top: 10px; font-size: 12px; text-align: center; }
+        .message.success { background: #d4edda; color: #155724; }
+        .message.error { background: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <div class="left">
+        <div class="header">
+            <h1>🐟 野烏金 POS</h1>
+            <p>輕點商品開始購物</p>
+            <p style="font-size: 12px; margin-top: 10px;">API: <input type="text" id="apiUrl" value="https://janus-kings-pos-production.up.railway.app" style="width: 350px; padding: 5px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.5); color: white;" placeholder="輸入 API URL"></p>
+        </div>
+
+        <div id="productGrid" class="product-grid"></div>
+    </div>
+
+    <div class="right">
+        <h2>🛒 購物車</h2>
+
+        <div id="cartItems" style="flex: 1; overflow-y: auto; margin-bottom: 15px;"></div>
+
+        <div class="summary">
+            <div class="summary-row">
+                <span>商品數量：</span>
+                <span id="totalQty">0</span>
+            </div>
+            <div class="summary-row total">
+                <span>總金額：</span>
+                <span id="totalAmount">NT$0</span>
+            </div>
+        </div>
+
+        <div class="checkout-form">
+            <div class="form-group">
+                <label>門市</label>
+                <select id="store">
+                    <option value="高雄">高雄</option>
+                    <option value="台中">台中</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>銷售人員</label>
+                <select id="staff">
+                    <option value="">-- 選擇人員 --</option>
+                    <option value="陳淑貞">陳淑貞</option>
+                    <option value="黃亭菱">黃亭菱</option>
+                    <option value="林岱蓉">林岱蓉</option>
+                    <option value="蔡秀梅">蔡秀梅</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label>客戶名稱 (選填)</label>
+                <input type="text" id="customerName" placeholder="客人名字">
+            </div>
+
+            <button class="checkout-btn" onclick="checkout()">✓ 完成結帳</button>
+            <div id="message"></div>
+        </div>
+    </div>
+
+    <script>
+        let cart = {};
+        let products = [];
+
+        const API_URL = () => document.getElementById('apiUrl').value;
+
+        async function loadProducts() {
+            try {
+                const res = await fetch(`${API_URL()}/api/inventory`);
+                const data = await res.json();
+                products = data.data;
+                renderProducts();
+            } catch (error) {
+                showMessage('載入商品失敗: ' + error.message, 'error');
+            }
+        }
+
+        function renderProducts() {
+            const grid = document.getElementById('productGrid');
+            grid.innerHTML = '';
+
+            products.forEach(p => {
+                const card = document.createElement('div');
+                card.className = 'product-card';
+                if (cart[p.id]) card.classList.add('selected');
+
+                const storeKey = document.getElementById('store').value === '高雄' ? 'gaoxiong' : 'taizhong';
+                const stock = p[storeKey];
+
+                card.innerHTML = `
+                    <div class="product-name">${p.name}</div>
+                    <div class="product-price">NT$${p.price}</div>
+                    <div class="product-stock">庫存: ${stock}</div>
+                `;
+
+                card.onclick = () => addToCart(p);
+                grid.appendChild(card);
+            });
+        }
+
+        function addToCart(product) {
+            const storeKey = document.getElementById('store').value === '高雄' ? 'gaoxiong' : 'taizhong';
+            const stock = product[storeKey];
+
+            if (stock <= 0) {
+                showMessage('庫存不足', 'error');
+                return;
+            }
+
+            if (!cart[product.id]) {
+                cart[product.id] = { ...product, qty: 0 };
+            }
+
+            if (cart[product.id].qty < stock) {
+                cart[product.id].qty += 1;
+            } else {
+                showMessage('庫存不足', 'error');
+            }
+
+            renderCart();
+            renderProducts();
+        }
+
+        function removeFromCart(productId) {
+            delete cart[productId];
+            renderCart();
+            renderProducts();
+        }
+
+        function updateQty(productId, newQty) {
+            const storeKey = document.getElementById('store').value === '高雄' ? 'gaoxiong' : 'taizhong';
+            const stock = cart[productId][storeKey];
+
+            if (newQty <= 0) {
+                removeFromCart(productId);
+            } else if (newQty <= stock) {
+                cart[productId].qty = newQty;
+                renderCart();
+            } else {
+                showMessage('庫存不足', 'error');
+            }
+        }
+
+        function renderCart() {
+            const cartDiv = document.getElementById('cartItems');
+            cartDiv.innerHTML = '';
+
+            let totalQty = 0;
+            let totalAmount = 0;
+
+            Object.values(cart).forEach(item => {
+                totalQty += item.qty;
+                totalAmount += item.qty * item.price;
+
+                cartDiv.innerHTML += `
+                    <div class="cart-item">
+                        <div class="cart-item-info">
+                            <div class="cart-item-name">${item.name}</div>
+                            <div class="cart-item-qty">NT$${item.price} × ${item.qty}</div>
+                        </div>
+                        <div style="text-align: right;">
+                            <input type="number" class="qty-input" value="${item.qty}" min="1" onchange="updateQty(${item.id}, parseInt(this.value))">
+                            <button class="remove-btn" onclick="removeFromCart(${item.id})">刪除</button>
+                        </div>
+                        <div class="cart-item-total">NT$${(item.qty * item.price).toLocaleString()}</div>
+                    </div>
+                `;
+            });
+
+            document.getElementById('totalQty').textContent = totalQty;
+            document.getElementById('totalAmount').textContent = `NT$${totalAmount.toLocaleString()}`;
+        }
+
+        async function checkout() {
+            const staff = document.getElementById('staff').value;
+            const store = document.getElementById('store').value;
+            const customerName = document.getElementById('customerName').value;
+
+            if (!staff) {
+                showMessage('請選擇銷售人員', 'error');
+                return;
+            }
+
+            if (Object.keys(cart).length === 0) {
+                showMessage('購物車是空的', 'error');
+                return;
+            }
+
+            const btn = event.target;
+            btn.disabled = true;
+
+            try {
+                for (const [productId, item] of Object.entries(cart)) {
+                    const res = await fetch(`${API_URL()}/api/sales/create`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            product_id: parseInt(productId),
+                            quantity: item.qty,
+                            store: store,
+                            staff: staff,
+                            customer_name: customerName
+                        })
+                    });
+
+                    if (!res.ok) {
+                        const error = await res.json();
+                        showMessage('結帳失敗: ' + error.message, 'error');
+                        btn.disabled = false;
+                        return;
+                    }
+                }
+
+                showMessage('✓ 結帳成功！', 'success');
+                cart = {};
+                document.getElementById('customerName').value = '';
+                renderCart();
+                loadProducts();
+                btn.disabled = false;
+            } catch (error) {
+                showMessage('結帳失敗: ' + error.message, 'error');
+                btn.disabled = false;
+            }
+        }
+
+        function showMessage(msg, type) {
+            const msgDiv = document.getElementById('message');
+            msgDiv.textContent = msg;
+            msgDiv.className = 'message ' + type;
+            setTimeout(() => { msgDiv.textContent = ''; msgDiv.className = ''; }, 3000);
+        }
+
+        // 初始化
+        loadProducts();
+    </script>
+</body>
+</html>
