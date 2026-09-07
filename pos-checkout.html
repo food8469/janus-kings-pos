@@ -99,19 +99,21 @@
 
     <script>
         let cart = {};
-        let products = [];
+        let products = [
+            { id: 1, name: '一口吃烏魚子-鹽味', price: 1280, gaoxiong: 50, taizhong: 30 },
+            { id: 2, name: '一口吃烏魚子-蜂蜜', price: 1380, gaoxiong: 40, taizhong: 25 },
+            { id: 3, name: '炭烤烏魚子-經典', price: 1580, gaoxiong: 35, taizhong: 20 },
+            { id: 4, name: '牛奶糖 6入', price: 210, gaoxiong: 100, taizhong: 80 },
+            { id: 5, name: '烏魚子禮盒-精選', price: 2980, gaoxiong: 20, taizhong: 15 },
+            { id: 6, name: '五味人生手拿盒', price: 399, gaoxiong: 60, taizhong: 40 },
+            { id: 7, name: '烏金經典組合', price: 3500, gaoxiong: 15, taizhong: 10 },
+            { id: 8, name: '烏魚子小禮包', price: 880, gaoxiong: 45, taizhong: 35 }
+        ];
 
         const API_URL = () => document.getElementById('apiUrl').value;
 
-        async function loadProducts() {
-            try {
-                const res = await fetch(`${API_URL()}/api/inventory`);
-                const data = await res.json();
-                products = data.data;
-                renderProducts();
-            } catch (error) {
-                showMessage('載入商品失敗: ' + error.message, 'error');
-            }
+        function loadProducts() {
+            renderProducts();
         }
 
         function renderProducts() {

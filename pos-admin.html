@@ -127,6 +127,18 @@
     <script>
         const API_URL = () => document.getElementById('apiUrl').value;
 
+        // 硬編碼商品資料
+        const hardcodedProducts = [
+            { id: 1, name: '一口吃烏魚子-鹽味', price: 1280, gaoxiong: 50, taizhong: 30 },
+            { id: 2, name: '一口吃烏魚子-蜂蜜', price: 1380, gaoxiong: 40, taizhong: 25 },
+            { id: 3, name: '炭烤烏魚子-經典', price: 1580, gaoxiong: 35, taizhong: 20 },
+            { id: 4, name: '牛奶糖 6入', price: 210, gaoxiong: 100, taizhong: 80 },
+            { id: 5, name: '烏魚子禮盒-精選', price: 2980, gaoxiong: 20, taizhong: 15 },
+            { id: 6, name: '五味人生手拿盒', price: 399, gaoxiong: 60, taizhong: 40 },
+            { id: 7, name: '烏金經典組合', price: 3500, gaoxiong: 15, taizhong: 10 },
+            { id: 8, name: '烏魚子小禮包', price: 880, gaoxiong: 45, taizhong: 35 }
+        ];
+
         function showTab(tabName) {
             document.querySelectorAll('.content').forEach(c => c.classList.remove('active'));
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
@@ -139,36 +151,30 @@
             else if (tabName === 'stocktake') loadStocktake();
         }
 
-        async function loadInventory() {
-            try {
-                const res = await fetch(`${API_URL()}/api/inventory`);
-                const data = await res.json();
-                const products = data.data;
+        function loadInventory() {
+            const products = hardcodedProducts;
 
-                // 填充下拉選單
-                const select = document.getElementById('productSelect');
-                select.innerHTML = '<option value="">-- 選擇商品 --</option>';
-                products.forEach(p => {
-                    select.innerHTML += `<option value="${p.id}">${p.name}</option>`;
-                });
+            // 填充下拉選單
+            const select = document.getElementById('productSelect');
+            select.innerHTML = '<option value="">-- 選擇商品 --</option>';
+            products.forEach(p => {
+                select.innerHTML += `<option value="${p.id}">${p.name}</option>`;
+            });
 
-                // 填充表格
-                const tbody = document.querySelector('#inventoryTable tbody');
-                tbody.innerHTML = '';
-                products.forEach(p => {
-                    tbody.innerHTML += `
-                        <tr>
-                            <td>${p.name}</td>
-                            <td>${p.gaoxiong}</td>
-                            <td>${p.taizhong}</td>
-                            <td>${p.gaoxiong + p.taizhong}</td>
-                            <td>NT$${p.price}</td>
-                        </tr>
-                    `;
-                });
-            } catch (error) {
-                alert('載入庫存失敗: ' + error.message);
-            }
+            // 填充表格
+            const tbody = document.querySelector('#inventoryTable tbody');
+            tbody.innerHTML = '';
+            products.forEach(p => {
+                tbody.innerHTML += `
+                    <tr>
+                        <td>${p.name}</td>
+                        <td>${p.gaoxiong}</td>
+                        <td>${p.taizhong}</td>
+                        <td>${p.gaoxiong + p.taizhong}</td>
+                        <td>NT$${p.price}</td>
+                    </tr>
+                `;
+            });
         }
 
         function loadProductDetails() {
@@ -247,27 +253,21 @@
             }
         }
 
-        async function loadStocktake() {
-            try {
-                const res = await fetch(`${API_URL()}/api/stocktake`);
-                const data = await res.json();
-                const tbody = document.querySelector('#stocktakeTable tbody');
-                tbody.innerHTML = '';
+        function loadStocktake() {
+            const tbody = document.querySelector('#stocktakeTable tbody');
+            tbody.innerHTML = '';
 
-                data.data.forEach(s => {
-                    tbody.innerHTML += `
-                        <tr>
-                            <td>${s.name}</td>
-                            <td>${s.gaoxiong}</td>
-                            <td>${s.taizhong}</td>
-                            <td>${s.total}</td>
-                            <td>NT$${s.price}</td>
-                        </tr>
-                    `;
-                });
-            } catch (error) {
-                alert('載入盤點紀錄失敗: ' + error.message);
-            }
+            hardcodedProducts.forEach(s => {
+                tbody.innerHTML += `
+                    <tr>
+                        <td>${s.name}</td>
+                        <td>${s.gaoxiong}</td>
+                        <td>${s.taizhong}</td>
+                        <td>${s.gaoxiong + s.taizhong}</td>
+                        <td>NT$${s.price}</td>
+                    </tr>
+                `;
+            });
         }
 
         async function refreshDashboard() {
