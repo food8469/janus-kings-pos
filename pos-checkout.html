@@ -8,8 +8,16 @@
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Microsoft JhengHei', sans-serif; background: #f5f5f5; display: flex; min-height: 100vh; }
         .left { flex: 2; background: white; padding: 20px; overflow-y: auto; }
-        .right { flex: 1; background: #f9f9f9; padding: 20px; border-left: 2px solid #ddd; display: flex; flex-direction: column; }
-        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        .right { flex: 1; background: #f9f9f9; padding: 20px; border-left: 2px solid #ddd; display: flex; flex-direction: column; transition: all 0.3s; }
+        .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+        .menu-btn { display: none; background: none; border: none; color: white; font-size: 24px; cursor: pointer; }
+        @media (max-width: 768px) {
+            body { flex-direction: column; }
+            .left { flex: 1; }
+            .right { flex: 0; max-width: 100%; border-left: none; border-top: 2px solid #ddd; position: fixed; bottom: 0; left: 0; right: 0; max-height: 50vh; display: none; z-index: 100; }
+            .right.show { display: flex; }
+            .menu-btn { display: block; }
+        }
         .header h1 { font-size: 24px; margin-bottom: 10px; }
         .product-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px; }
         .product-card { background: white; border: 2px solid #ddd; border-radius: 8px; padding: 15px; cursor: pointer; transition: all 0.3s; text-align: center; }
@@ -43,9 +51,12 @@
 <body>
     <div class="left">
         <div class="header">
-            <h1>🐟 野烏金 POS</h1>
-            <p>輕點商品開始購物</p>
-            <p style="font-size: 12px; margin-top: 10px;">API: <input type="text" id="apiUrl" value="https://janus-kings-pos-production.up.railway.app" style="width: 350px; padding: 5px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.5); color: white;" placeholder="輸入 API URL"></p>
+            <div>
+                <h1>🐟 野烏金 POS</h1>
+                <p>輕點商品開始購物</p>
+                <p style="font-size: 12px; margin-top: 10px;">API: <input type="text" id="apiUrl" value="https://janus-kings-pos-production.up.railway.app" style="width: 350px; padding: 5px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.5); color: white;" placeholder="輸入 API URL"></p>
+            </div>
+            <button class="menu-btn" onclick="toggleCart()">☰</button>
         </div>
 
         <div id="productGrid" class="product-grid"></div>
@@ -269,6 +280,11 @@
             msgDiv.textContent = msg;
             msgDiv.className = 'message ' + type;
             setTimeout(() => { msgDiv.textContent = ''; msgDiv.className = ''; }, 3000);
+        }
+
+        function toggleCart() {
+            const rightPanel = document.querySelector('.right');
+            rightPanel.classList.toggle('show');
         }
 
         // 初始化
