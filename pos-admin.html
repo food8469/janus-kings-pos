@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>野烏金 POS - 後台管理</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Microsoft JhengHei', sans-serif; background: #f5f5f5; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+        .header { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        .header h1 { color: #333; margin-bottom: 10px; }
+        .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+        .tab-btn { padding: 10px 20px; background: white; border: 2px solid #ddd; cursor: pointer; border-radius: 6px; font-size: 14px; }
+        .tab-btn.active { background: #667eea; color: white; border-color: #667eea; }
+        .content { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: none; }
+        .content.active { display: block; }
+        table { width: 100%; border-collapse: collapse; margin: 20px 0; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background: #f9f9f9; font-weight: 600; }
+        tr:hover { background: #f9f9f9; }
+        .input-group { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin: 15px 0; }
+        input, select { padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
+        button { padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
+        button:hover { background: #5568d3; }
+        .stat-box { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin: 20px 0; }
+        .stat { background: #f9f9f9; padding: 15px; border-radius: 6px; text-align: center; }
+        .stat-value { font-size: 24px; font-weight: bold; color: #667eea; }
+        .stat-label { font-size: 12px; color: #999; margin-top: 5px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🐟 野烏金 POS 系統 - 後台管理</h1>
+            <p>API URL: <input type="text" id="apiUrl" value="https://janus-kings-pos-production.up.railway.app" style="width: 400px;"></p>
+        </div>
+
+        <div class="tabs">
+            <button class="tab-btn active" onclick="showTab('dashboard')">📊 儀表板</button>
+            <button class="tab-btn" onclick="showTab('inventory')">📦 庫存管理</button>
+            <button class="tab-btn" onclick="showTab('sales')">💰 交易紀錄</button>
+            <button class="tab-btn" onclick="showTab('staff')">👥 員工統計</button>
+            <button class="tab-btn" onclick="showTab('stocktake')">📋 盤點紀錄</button>
+        </div>
+
+        <!-- 儀表板 -->
+        <div id="dashboard" class="content active">
+            <h2>儀表板</h2>
+            <div class="stat-box">
+                <div class="stat">
+                    <div class="stat-value" id="totalSales">0</div>
+                    <div class="stat-label">今日銷售筆數</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="totalAmount">NT$0</div>
+                    <div class="stat-label">今日銷售金額</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="staffCount">0</div>
+                    <div class="stat-label">活躍員工</div>
+                </div>
+                <div class="stat">
+                    <div class="stat-value" id="totalInventory">0</div>
+                    <div class="stat-label">總庫存件數</div>
+                </div>
+            </div>
+            <button onclick="refreshDashboard()">🔄 重新整理</button>
+        </div>
+
+        <!-- 庫存管理 -->
+        <div id="inventory" class="content">
+            <h2>庫存管理</h2>
+            <div class="input-group">
+                <select id="productSelect" onchange="loadProductDetails()">
+                    <option value="">-- 選擇商品 --</option>
+                </select>
+                <input type="number" id="gaoxiong" placeholder="高雄庫存" min="0">
+                <input type="number" id="taizhong" placeholder="台中庫存" min="0">
+            </div>
+            <button onclick="updateInventory()">💾 保存庫存</button>
+            <table id="inventoryTable">
+                <thead>
+                    <tr><th>商品</th><th>高雄</th><th>台中</th><th>合計</th><th>單價</th></tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <!-- 交易紀錄 -->
+        <div id="sales" class="content">
+            <h2>交易紀錄</h2>
+            <button onclick="loadSalesRecords()">🔄 重新整理交易記錄</button>
+            <table id="salesTable">
+                <thead>
+                    <tr><th>時間</th><th>商品</th><th>數量</th><th>金額</th><th>門市</th><th>員工</th></tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <!-- 員工統計 -->
+        <div id="staff" class="content">
+            <h2>員工統計</h2>
+            <button onclick="loadStaffStats()">🔄 重新整理</button>
+            <table id="staffTable">
+                <thead>
+                    <tr><th>員工名稱</th><th>銷售筆數</th><th>銷售金額</th><th>高雄筆數</th><th>台中筆數</th></tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <!-- 盤點紀錄 -->
+        <div id="stocktake" class="content">
+            <h2>盤點紀錄（當前庫存）</h2>
+            <button onclick="loadStocktake()">🔄 重新整理</button>
+            <table id="stocktakeTable">
+                <thead>
+                    <tr><th>商品</th><th>高雄</th><th>台中</th><th>合計</th><th>單價</th></tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = () => document.getElementById('apiUrl').value;
+
+        function showTab(tabName) {
+            document.querySelectorAll('.content').forEach(c => c.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(tabName).classList.add('active');
+            event.target.classList.add('active');
+
+            if (tabName === 'inventory') loadInventory();
+            else if (tabName === 'sales') loadSalesRecords();
+            else if (tabName === 'staff') loadStaffStats();
+            else if (tabName === 'stocktake') loadStocktake();
+        }
+
+        async function loadInventory() {
+            try {
+                const res = await fetch(`${API_URL()}/api/inventory`);
+                const data = await res.json();
+                const products = data.data;
+
+                // 填充下拉選單
+                const select = document.getElementById('productSelect');
+                select.innerHTML = '<option value="">-- 選擇商品 --</option>';
+                products.forEach(p => {
+                    select.innerHTML += `<option value="${p.id}">${p.name}</option>`;
+                });
+
+                // 填充表格
+                const tbody = document.querySelector('#inventoryTable tbody');
+                tbody.innerHTML = '';
+                products.forEach(p => {
+                    tbody.innerHTML += `
+                        <tr>
+                            <td>${p.name}</td>
+                            <td>${p.gaoxiong}</td>
+                            <td>${p.taizhong}</td>
+                            <td>${p.gaoxiong + p.taizhong}</td>
+                            <td>NT$${p.price}</td>
+                        </tr>
+                    `;
+                });
+            } catch (error) {
+                alert('載入庫存失敗: ' + error.message);
+            }
+        }
+
+        function loadProductDetails() {
+            // 根據選擇的商品填入數量
+        }
+
+        async function updateInventory() {
+            const productId = document.getElementById('productSelect').value;
+            const gaoxiong = parseInt(document.getElementById('gaoxiong').value);
+            const taizhong = parseInt(document.getElementById('taizhong').value);
+
+            if (!productId || isNaN(gaoxiong) || isNaN(taizhong)) {
+                alert('請填入正確的資訊');
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API_URL()}/api/inventory/update`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ product_id: parseInt(productId), gaoxiong, taizhong })
+                });
+                const data = await res.json();
+                alert('庫存已更新！');
+                loadInventory();
+            } catch (error) {
+                alert('更新失敗: ' + error.message);
+            }
+        }
+
+        async function loadSalesRecords() {
+            try {
+                const res = await fetch(`${API_URL()}/api/sales/records`);
+                const data = await res.json();
+                const tbody = document.querySelector('#salesTable tbody');
+                tbody.innerHTML = '';
+
+                data.data.forEach(r => {
+                    const time = new Date(r.timestamp).toLocaleString('zh-TW');
+                    tbody.innerHTML += `
+                        <tr>
+                            <td>${time}</td>
+                            <td>${r.product_name}</td>
+                            <td>${r.quantity}</td>
+                            <td>NT$${r.total}</td>
+                            <td>${r.store}</td>
+                            <td>${r.staff}</td>
+                        </tr>
+                    `;
+                });
+            } catch (error) {
+                alert('載入交易紀錄失敗: ' + error.message);
+            }
+        }
+
+        async function loadStaffStats() {
+            try {
+                const res = await fetch(`${API_URL()}/api/staff/stats`);
+                const data = await res.json();
+                const tbody = document.querySelector('#staffTable tbody');
+                tbody.innerHTML = '';
+
+                data.data.forEach(s => {
+                    tbody.innerHTML += `
+                        <tr>
+                            <td>${s.name}</td>
+                            <td>${s.sales}</td>
+                            <td>NT$${s.amount}</td>
+                            <td>${s.gaoxiong}</td>
+                            <td>${s.taizhong}</td>
+                        </tr>
+                    `;
+                });
+            } catch (error) {
+                alert('載入員工統計失敗: ' + error.message);
+            }
+        }
+
+        async function loadStocktake() {
+            try {
+                const res = await fetch(`${API_URL()}/api/stocktake`);
+                const data = await res.json();
+                const tbody = document.querySelector('#stocktakeTable tbody');
+                tbody.innerHTML = '';
+
+                data.data.forEach(s => {
+                    tbody.innerHTML += `
+                        <tr>
+                            <td>${s.name}</td>
+                            <td>${s.gaoxiong}</td>
+                            <td>${s.taizhong}</td>
+                            <td>${s.total}</td>
+                            <td>NT$${s.price}</td>
+                        </tr>
+                    `;
+                });
+            } catch (error) {
+                alert('載入盤點紀錄失敗: ' + error.message);
+            }
+        }
+
+        async function refreshDashboard() {
+            try {
+                const res = await fetch(`${API_URL()}/api/sales/records`);
+                const data = await res.json();
+                const records = data.data;
+
+                document.getElementById('totalSales').textContent = records.length;
+                const total = records.reduce((sum, r) => sum + r.total, 0);
+                document.getElementById('totalAmount').textContent = `NT$${total.toLocaleString()}`;
+
+                const staffSet = new Set(records.map(r => r.staff));
+                document.getElementById('staffCount').textContent = staffSet.size;
+
+                const invRes = await fetch(`${API_URL()}/api/inventory`);
+                const invData = await invRes.json();
+                const totalInv = invData.data.reduce((sum, p) => sum + p.gaoxiong + p.taizhong, 0);
+                document.getElementById('totalInventory').textContent = totalInv;
+            } catch (error) {
+                console.error('刷新失敗:', error);
+            }
+        }
+
+        // 初始化
+        loadInventory();
+        refreshDashboard();
+    </script>
+</body>
+</html>
