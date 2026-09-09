@@ -10,13 +10,14 @@
         .left { flex: 2; background: white; padding: 20px; overflow-y: auto; }
         .right { flex: 1; background: #f9f9f9; padding: 20px; border-left: 2px solid #ddd; display: flex; flex-direction: column; transition: all 0.3s; }
         .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
-        .menu-btn { display: none; background: none; border: none; color: white; font-size: 24px; cursor: pointer; }
+        .menu-btn { background: none; border: none; color: white; font-size: 24px; cursor: pointer; margin-left: auto; }
+        .menu-hidden .right { display: none !important; }
+        .menu-hidden .left { flex: 1 !important; }
         @media (max-width: 900px) {
             body { flex-direction: column; }
             .left { flex: 1; }
-            .right { flex: 0; max-width: 100%; border-left: none; border-top: 2px solid #ddd; position: fixed; bottom: 0; left: 0; right: 0; max-height: 50vh; display: none; z-index: 100; }
-            .right.show { display: flex; }
-            .menu-btn { display: block; }
+            .right { border-left: none; position: fixed; bottom: 0; left: 0; right: 0; max-height: 60vh; overflow-y: auto; z-index: 100; }
+            .right.show { display: flex !important; }
         }
         .header h1 { font-size: 24px; margin-bottom: 10px; }
         .product-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px; }
@@ -287,7 +288,27 @@
             rightPanel.classList.toggle('show');
         }
 
+        function updateLayout() {
+            const body = document.body;
+            const rightPanel = document.querySelector('.right');
+            const menuBtn = document.querySelector('.menu-btn');
+
+            if (window.innerWidth <= 900) {
+                body.classList.add('menu-hidden');
+                rightPanel.classList.remove('show');
+                menuBtn.style.display = 'block';
+            } else {
+                body.classList.remove('menu-hidden');
+                rightPanel.classList.add('show');
+                menuBtn.style.display = 'none';
+            }
+        }
+
+        window.addEventListener('resize', updateLayout);
+        window.addEventListener('load', updateLayout);
+
         // 初始化
+        updateLayout();
         loadProducts();
     </script>
 </body>
