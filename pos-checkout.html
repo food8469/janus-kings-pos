@@ -42,12 +42,12 @@
         .message.success { background: #d4edda; color: #155724; }
         .message.error { background: #f8d7da; color: #721c24; }
 
-        @media (max-width: 900px) {
+        @media (max-width: 1200px) {
             .container { flex-direction: column; }
             .left { flex: 1; }
-            .right { flex: 0; position: fixed; bottom: 0; left: 0; right: 0; max-height: 60vh; border-left: none; border-top: 2px solid #ddd; display: none; flex-direction: column; z-index: 1000; }
-            .right.show { display: flex; }
-            .menu-toggle { display: block; }
+            .right { position: fixed; bottom: 0; left: 0; right: 0; max-height: 70vh; border-left: none; border-top: 2px solid #ddd; display: none; flex-direction: column; z-index: 1000; background: #f9f9f9; }
+            .right.show { display: flex !important; }
+            .menu-toggle { display: block !important; }
             .product-grid { grid-template-columns: repeat(2, 1fr); }
         }
 
@@ -55,6 +55,7 @@
             .product-grid { grid-template-columns: 1fr; }
             .header { padding: 15px; }
             .header h1 { font-size: 18px; }
+            .menu-toggle { font-size: 24px; }
         }
     </style>
 </head>
