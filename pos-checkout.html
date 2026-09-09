@@ -6,20 +6,14 @@
     <title>野烏金 POS - 前台結帳</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Microsoft JhengHei', sans-serif; background: #f5f5f5; display: flex; min-height: 100vh; }
+        body { font-family: 'Microsoft JhengHei', sans-serif; background: #f5f5f5; }
+        .container { display: flex; min-height: 100vh; }
         .left { flex: 2; background: white; padding: 20px; overflow-y: auto; }
-        .right { flex: 1; background: #f9f9f9; padding: 20px; border-left: 2px solid #ddd; display: flex; flex-direction: column; transition: all 0.3s; }
+        .right { flex: 1; background: #f9f9f9; padding: 20px; border-left: 2px solid #ddd; display: flex; flex-direction: column; }
         .header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
-        .menu-btn { background: none; border: none; color: white; font-size: 24px; cursor: pointer; margin-left: auto; }
-        .menu-hidden .right { display: none !important; }
-        .menu-hidden .left { flex: 1 !important; }
-        @media (max-width: 900px) {
-            body { flex-direction: column; }
-            .left { flex: 1; }
-            .right { border-left: none; position: fixed; bottom: 0; left: 0; right: 0; max-height: 60vh; overflow-y: auto; z-index: 100; }
-            .right.show { display: flex !important; }
-        }
+        .header-content { flex: 1; }
         .header h1 { font-size: 24px; margin-bottom: 10px; }
+        .menu-toggle { background: none; border: none; color: white; font-size: 28px; cursor: pointer; padding: 10px; display: none; }
         .product-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px; }
         .product-card { background: white; border: 2px solid #ddd; border-radius: 8px; padding: 15px; cursor: pointer; transition: all 0.3s; text-align: center; }
         .product-card:hover { border-color: #667eea; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2); }
@@ -31,9 +25,9 @@
         .cart-item-info { flex: 1; }
         .cart-item-name { font-weight: 600; font-size: 14px; }
         .cart-item-qty { font-size: 12px; color: #999; }
-        .cart-item-total { font-weight: bold; color: #667eea; }
+        .cart-item-total { font-weight: bold; color: #667eea; margin-right: 10px; }
         .remove-btn { background: #ff6b6b; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 12px; }
-        .qty-input { width: 60px; padding: 5px; border: 1px solid #ddd; border-radius: 4px; text-align: center; }
+        .qty-input { width: 50px; padding: 5px; border: 1px solid #ddd; border-radius: 4px; text-align: center; font-size: 12px; }
         .summary { background: white; padding: 15px; border-radius: 6px; margin-top: auto; }
         .summary-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; }
         .summary-row.total { border-bottom: none; font-size: 18px; font-weight: bold; color: #667eea; }
@@ -47,65 +41,84 @@
         .message { padding: 10px; border-radius: 4px; margin-top: 10px; font-size: 12px; text-align: center; }
         .message.success { background: #d4edda; color: #155724; }
         .message.error { background: #f8d7da; color: #721c24; }
+
+        @media (max-width: 900px) {
+            .container { flex-direction: column; }
+            .left { flex: 1; }
+            .right { flex: 0; position: fixed; bottom: 0; left: 0; right: 0; max-height: 60vh; border-left: none; border-top: 2px solid #ddd; display: none; flex-direction: column; z-index: 1000; }
+            .right.show { display: flex; }
+            .menu-toggle { display: block; }
+            .product-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        @media (max-width: 600px) {
+            .product-grid { grid-template-columns: 1fr; }
+            .header { padding: 15px; }
+            .header h1 { font-size: 18px; }
+        }
     </style>
 </head>
 <body>
-    <div class="left">
-        <div class="header">
-            <div>
-                <h1>🐟 野烏金 POS</h1>
-                <p>輕點商品開始購物</p>
-                <p style="font-size: 12px; margin-top: 10px;">API: <input type="text" id="apiUrl" value="https://janus-kings-pos-production.up.railway.app" style="width: 350px; padding: 5px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.5); color: white;" placeholder="輸入 API URL"></p>
+    <div class="container">
+        <div class="left">
+            <div class="header">
+                <div class="header-content">
+                    <h1>🐟 野烏金 POS</h1>
+                    <p style="font-size: 12px; margin-top: 10px;">API: <input type="text" id="apiUrl" value="https://janus-kings-pos-production.up.railway.app" style="width: 300px; padding: 5px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.5); color: white;" placeholder="輸入 API URL"></p>
+                </div>
+                <button class="menu-toggle" onclick="toggleCart()">☰</button>
             </div>
-            <button class="menu-btn" onclick="toggleCart()">☰</button>
+
+            <div id="productGrid" class="product-grid"></div>
         </div>
 
-        <div id="productGrid" class="product-grid"></div>
-    </div>
-
-    <div class="right">
-        <h2>🛒 購物車</h2>
-
-        <div id="cartItems" style="flex: 1; overflow-y: auto; margin-bottom: 15px;"></div>
-
-        <div class="summary">
-            <div class="summary-row">
-                <span>商品數量：</span>
-                <span id="totalQty">0</span>
-            </div>
-            <div class="summary-row total">
-                <span>總金額：</span>
-                <span id="totalAmount">NT$0</span>
-            </div>
-        </div>
-
-        <div class="checkout-form">
-            <div class="form-group">
-                <label>門市</label>
-                <select id="store">
-                    <option value="高雄">高雄</option>
-                    <option value="台中">台中</option>
-                </select>
+        <div class="right" id="cartPanel">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <h2>🛒 購物車</h2>
+                <button class="menu-toggle" onclick="toggleCart()" style="display: block; font-size: 20px;">✕</button>
             </div>
 
-            <div class="form-group">
-                <label>銷售人員</label>
-                <select id="staff">
-                    <option value="">-- 選擇人員 --</option>
-                    <option value="陳淑貞">陳淑貞</option>
-                    <option value="黃亭菱">黃亭菱</option>
-                    <option value="林岱蓉">林岱蓉</option>
-                    <option value="蔡秀梅">蔡秀梅</option>
-                </select>
+            <div id="cartItems" style="flex: 1; overflow-y: auto; margin-bottom: 15px;"></div>
+
+            <div class="summary">
+                <div class="summary-row">
+                    <span>商品數量：</span>
+                    <span id="totalQty">0</span>
+                </div>
+                <div class="summary-row total">
+                    <span>總金額：</span>
+                    <span id="totalAmount">NT$0</span>
+                </div>
             </div>
 
-            <div class="form-group">
-                <label>客戶名稱 (選填)</label>
-                <input type="text" id="customerName" placeholder="客人名字">
-            </div>
+            <div class="checkout-form">
+                <div class="form-group">
+                    <label>門市</label>
+                    <select id="store">
+                        <option value="高雄">高雄</option>
+                        <option value="台中">台中</option>
+                    </select>
+                </div>
 
-            <button class="checkout-btn" onclick="checkout()">✓ 完成結帳</button>
-            <div id="message"></div>
+                <div class="form-group">
+                    <label>銷售人員</label>
+                    <select id="staff">
+                        <option value="">-- 選擇人員 --</option>
+                        <option value="陳淑貞">陳淑貞</option>
+                        <option value="黃亭菱">黃亭菱</option>
+                        <option value="林岱蓉">林岱蓉</option>
+                        <option value="蔡秀梅">蔡秀梅</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>客戶名稱 (選填)</label>
+                    <input type="text" id="customerName" placeholder="客人名字">
+                </div>
+
+                <button class="checkout-btn" onclick="checkout()">✓ 完成結帳</button>
+                <div id="message"></div>
+            </div>
         </div>
     </div>
 
@@ -123,10 +136,6 @@
         ];
 
         const API_URL = () => document.getElementById('apiUrl').value;
-
-        function loadProducts() {
-            renderProducts();
-        }
 
         function renderProducts() {
             const grid = document.getElementById('productGrid');
@@ -211,9 +220,9 @@
                             <div class="cart-item-name">${item.name}</div>
                             <div class="cart-item-qty">NT$${item.price} × ${item.qty}</div>
                         </div>
-                        <div style="text-align: right;">
+                        <div style="display: flex; gap: 5px; align-items: center;">
                             <input type="number" class="qty-input" value="${item.qty}" min="1" onchange="updateQty(${item.id}, parseInt(this.value))">
-                            <button class="remove-btn" onclick="removeFromCart(${item.id})">刪除</button>
+                            <button class="remove-btn" onclick="removeFromCart(${item.id})">刪</button>
                         </div>
                         <div class="cart-item-total">NT$${(item.qty * item.price).toLocaleString()}</div>
                     </div>
@@ -268,7 +277,6 @@
                 cart = {};
                 document.getElementById('customerName').value = '';
                 renderCart();
-                loadProducts();
                 btn.disabled = false;
             } catch (error) {
                 showMessage('結帳失敗: ' + error.message, 'error');
@@ -284,32 +292,13 @@
         }
 
         function toggleCart() {
-            const rightPanel = document.querySelector('.right');
-            rightPanel.classList.toggle('show');
+            const cartPanel = document.getElementById('cartPanel');
+            cartPanel.classList.toggle('show');
         }
-
-        function updateLayout() {
-            const body = document.body;
-            const rightPanel = document.querySelector('.right');
-            const menuBtn = document.querySelector('.menu-btn');
-
-            if (window.innerWidth <= 900) {
-                body.classList.add('menu-hidden');
-                rightPanel.classList.remove('show');
-                menuBtn.style.display = 'block';
-            } else {
-                body.classList.remove('menu-hidden');
-                rightPanel.classList.add('show');
-                menuBtn.style.display = 'none';
-            }
-        }
-
-        window.addEventListener('resize', updateLayout);
-        window.addEventListener('load', updateLayout);
 
         // 初始化
-        updateLayout();
-        loadProducts();
+        renderProducts();
+        renderCart();
     </script>
 </body>
 </html>
