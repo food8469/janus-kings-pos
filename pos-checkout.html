@@ -16,12 +16,17 @@
         .menu-btn { background: none; border: none; color: white; font-size: 48px; cursor: pointer; padding: 20px; line-height: 1; transition: all 0.3s; }
         .menu-btn:hover { transform: scale(1.1); }
         .product-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin-bottom: 20px; }
+        .series-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border-radius: 8px; padding: 30px; cursor: pointer; transition: all 0.3s; text-align: center; }
+        .series-card:hover { transform: translateY(-5px); box-shadow: 0 8px 20px rgba(102, 126, 234, 0.3); }
+        .series-card h3 { font-size: 18px; margin-bottom: 10px; }
+        .series-card p { font-size: 12px; opacity: 0.9; }
         .product-card { background: white; border: 2px solid #ddd; border-radius: 8px; padding: 15px; cursor: pointer; transition: all 0.3s; text-align: center; }
         .product-card:hover { border-color: #667eea; box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2); }
         .product-card.selected { border-color: #667eea; background: #f0f4ff; }
         .product-name { font-weight: 600; margin: 10px 0 5px; font-size: 14px; }
         .product-price { color: #667eea; font-size: 16px; font-weight: bold; }
-        .product-stock { font-size: 12px; color: #999; margin-top: 5px; }
+        .back-btn { background: #667eea; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; margin-bottom: 15px; font-size: 14px; }
+        .back-btn:hover { background: #5568d3; }
         .cart-item { background: white; padding: 12px; border-radius: 6px; margin: 8px 0; display: flex; justify-content: space-between; align-items: center; }
         .cart-item-info { flex: 1; }
         .cart-item-name { font-weight: 600; font-size: 14px; }
@@ -62,16 +67,24 @@
                     <h1>🐟 野烏金 POS</h1>
                     <p style="font-size: 12px; margin-top: 10px;">API: <input type="text" id="apiUrl" value="https://janus-kings-pos-production.up.railway.app" style="width: 300px; padding: 5px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.5); color: white;" placeholder="輸入 API URL"></p>
                 </div>
-                <button class="menu-toggle" onclick="toggleCart()">☰</button>
+                <button class="menu-btn" onclick="toggleCart()">☰</button>
             </div>
 
-            <div id="productGrid" class="product-grid"></div>
+            <div id="view" style="display: block;">
+                <!-- 系列列表視圖 -->
+                <div id="seriesView" class="product-grid" style="display: grid;"></div>
+                <!-- 品項選擇視圖 -->
+                <div id="itemsView" style="display: none;">
+                    <button class="back-btn" onclick="backToSeries()">← 返回系列</button>
+                    <div id="itemsGrid" class="product-grid"></div>
+                </div>
+            </div>
         </div>
 
         <div class="right" id="cartPanel">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
                 <h2>🛒 購物車</h2>
-                <button class="menu-toggle" onclick="toggleCart()" style="display: block; font-size: 20px;">✕</button>
+                <button class="menu-btn" onclick="toggleCart()" style="display: none; font-size: 20px; padding: 10px;">✕</button>
             </div>
 
             <div id="cartItems" style="flex: 1; overflow-y: auto; margin-bottom: 15px;"></div>
@@ -119,83 +132,110 @@
     </div>
 
     <script>
+        const API_URL = () => document.getElementById('apiUrl').value;
         let cart = {};
-        let products = [
-            { id: 4, name: '牛奶糖 6入', price: 210, gaoxiong: 100, taizhong: 80 },
-            { id: 4, name: '牛奶糖 6入', price: 210, gaoxiong: 100, taizhong: 80 },
-            { id: 4, name: '牛奶糖 6入', price: 210, gaoxiong: 100, taizhong: 80 },
-            { id: 4, name: '牛奶糖 6入', price: 210, gaoxiong: 100, taizhong: 80 },
-            { id: 5, name: '烏魚子禮盒-精選', price: 2980, gaoxiong: 20, taizhong: 15 },
-            { id: 6, name: '五味人生手拿盒', price: 399, gaoxiong: 60, taizhong: 40 },
-            { id: 7, name: '烏金經典組合', price: 3500, gaoxiong: 15, taizhong: 10 },
-            { id: 8, name: '烏魚子小禮包', price: 880, gaoxiong: 45, taizhong: 35 }
+        let currentSeries = null;
+
+        const seriesData = [
+            {
+                id: 1,
+                name: '經典一口吃',
+                items: [
+                    { id: 101, name: '鹽味', price: 1280 },
+                    { id: 102, name: '紅酒', price: 1280 },
+                    { id: 103, name: '味噌', price: 1380 },
+                    { id: 104, name: '香辣', price: 1380 },
+                    { id: 105, name: '花雕', price: 1380 },
+                    { id: 106, name: '烏魚腱', price: 1280 }
+                ]
+            },
+            {
+                id: 2,
+                name: '頂規一口吃',
+                items: [
+                    { id: 201, name: '竹鹽', price: 1580 },
+                    { id: 202, name: '玫瑰紅酒', price: 1580 },
+                    { id: 203, name: '黑松露', price: 1580 },
+                    { id: 204, name: '瑤柱干貝', price: 1580 },
+                    { id: 205, name: '哇沙米', price: 1580 }
+                ]
+            },
+            {
+                id: 3,
+                name: '混搭款',
+                items: [
+                    { id: 301, name: '三珍', price: 1380 },
+                    { id: 302, name: '五珍', price: 1380 },
+                    { id: 303, name: '珍味', price: 1580 }
+                ]
+            }
         ];
 
-        const API_URL = () => document.getElementById('apiUrl').value;
-
-        function renderProducts() {
-            const grid = document.getElementById('productGrid');
-            grid.innerHTML = '';
-
-            products.forEach(p => {
+        function renderSeriesView() {
+            const seriesView = document.getElementById('seriesView');
+            seriesView.innerHTML = '';
+            seriesData.forEach(series => {
                 const card = document.createElement('div');
-                card.className = 'product-card';
-                if (cart[p.id]) card.classList.add('selected');
-
-                const storeKey = document.getElementById('store').value === '高雄' ? 'gaoxiong' : 'taizhong';
-                const stock = p[storeKey];
-
+                card.className = 'series-card';
                 card.innerHTML = `
-                    <div class="product-name">${p.name}</div>
-                    <div class="product-price">NT$${p.price}</div>
-                    <div class="product-stock">庫存: ${stock}</div>
+                    <h3>${series.name}</h3>
+                    <p>${series.items.length} 個品項</p>
                 `;
-
-                card.onclick = () => addToCart(p);
-                grid.appendChild(card);
+                card.onclick = () => selectSeries(series);
+                seriesView.appendChild(card);
             });
         }
 
+        function selectSeries(series) {
+            currentSeries = series;
+            document.getElementById('seriesView').style.display = 'none';
+            document.getElementById('itemsView').style.display = 'block';
+            renderItemsView();
+        }
+
+        function renderItemsView() {
+            const itemsGrid = document.getElementById('itemsGrid');
+            itemsGrid.innerHTML = '';
+            currentSeries.items.forEach(item => {
+                const card = document.createElement('div');
+                card.className = 'product-card';
+                if (cart[item.id]) card.classList.add('selected');
+                card.innerHTML = `
+                    <div class="product-name">${item.name}</div>
+                    <div class="product-price">NT$${item.price}</div>
+                `;
+                card.onclick = () => addToCart(item);
+                itemsGrid.appendChild(card);
+            });
+        }
+
+        function backToSeries() {
+            currentSeries = null;
+            document.getElementById('seriesView').style.display = 'grid';
+            document.getElementById('itemsView').style.display = 'none';
+        }
+
         function addToCart(product) {
-            const storeKey = document.getElementById('store').value === '高雄' ? 'gaoxiong' : 'taizhong';
-            const stock = product[storeKey];
-
-            if (stock <= 0) {
-                showMessage('庫存不足', 'error');
-                return;
-            }
-
             if (!cart[product.id]) {
                 cart[product.id] = { ...product, qty: 0 };
             }
-
-            if (cart[product.id].qty < stock) {
-                cart[product.id].qty += 1;
-            } else {
-                showMessage('庫存不足', 'error');
-            }
-
+            cart[product.id].qty += 1;
             renderCart();
-            renderProducts();
+            if (currentSeries) renderItemsView();
         }
 
         function removeFromCart(productId) {
             delete cart[productId];
             renderCart();
-            renderProducts();
+            if (currentSeries) renderItemsView();
         }
 
         function updateQty(productId, newQty) {
-            const storeKey = document.getElementById('store').value === '高雄' ? 'gaoxiong' : 'taizhong';
-            const stock = cart[productId][storeKey];
-
             if (newQty <= 0) {
                 removeFromCart(productId);
-            } else if (newQty <= stock) {
+            } else {
                 cart[productId].qty = newQty;
                 renderCart();
-            } else {
-                showMessage('庫存不足', 'error');
             }
         }
 
@@ -293,7 +333,7 @@
         }
 
         // 初始化
-        renderProducts();
+        renderSeriesView();
         renderCart();
     </script>
 </body>
