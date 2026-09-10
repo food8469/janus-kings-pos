@@ -70,13 +70,17 @@
                 <button class="menu-btn" onclick="toggleCart()">☰</button>
             </div>
 
-            <div id="view" style="display: block;">
-                <!-- 系列列表視圖 -->
-                <div id="seriesView" class="product-grid" style="display: grid;"></div>
-                <!-- 品項選擇視圖 -->
-                <div id="itemsView" style="display: none;">
-                    <button class="back-btn" onclick="backToSeries()">← 返回系列</button>
-                    <div id="itemsGrid" class="product-grid"></div>
+            <!-- 系列列表視圖 -->
+            <div id="seriesView" class="product-grid" style="display: grid;"></div>
+
+            <!-- 品項選擇彈窗 -->
+            <div id="itemModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 999; padding: 20px;">
+                <div style="background: white; border-radius: 8px; padding: 20px; max-height: 80vh; overflow-y: auto; margin: auto; width: 90%; max-width: 600px; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                        <h2 id="modalTitle" style="margin: 0;"></h2>
+                        <button onclick="closeItemModal()" style="background: none; border: none; font-size: 24px; cursor: pointer;">✕</button>
+                    </div>
+                    <div id="itemsGrid" class="product-grid" style="grid-template-columns: repeat(2, 1fr); gap: 10px;"></div>
                 </div>
             </div>
         </div>
@@ -188,9 +192,9 @@
 
         function selectSeries(series) {
             currentSeries = series;
-            document.getElementById('seriesView').style.display = 'none';
-            document.getElementById('itemsView').style.display = 'block';
+            document.getElementById('modalTitle').textContent = series.name;
             renderItemsView();
+            document.getElementById('itemModal').style.display = 'block';
         }
 
         function renderItemsView() {
@@ -204,15 +208,17 @@
                     <div class="product-name">${item.name}</div>
                     <div class="product-price">NT$${item.price}</div>
                 `;
-                card.onclick = () => addToCart(item);
+                card.onclick = () => {
+                    addToCart(item);
+                    closeItemModal();
+                };
                 itemsGrid.appendChild(card);
             });
         }
 
-        function backToSeries() {
+        function closeItemModal() {
+            document.getElementById('itemModal').style.display = 'none';
             currentSeries = null;
-            document.getElementById('seriesView').style.display = 'grid';
-            document.getElementById('itemsView').style.display = 'none';
         }
 
         function addToCart(product) {
