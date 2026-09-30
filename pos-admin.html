@@ -10,10 +10,10 @@
         .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
         .header { background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
         .header h1 { color: #333; margin-bottom: 10px; }
-        .tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+        .tabs { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
         .tab-btn { padding: 10px 20px; background: white; border: 2px solid #ddd; cursor: pointer; border-radius: 6px; font-size: 14px; }
         .tab-btn.active { background: #667eea; color: white; border-color: #667eea; }
-        .content { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: none; }
+        .content { background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); display: none; overflow-x: auto; }
         .content.active { display: block; }
         table { width: 100%; border-collapse: collapse; margin: 20px 0; }
         th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
@@ -27,13 +27,19 @@
         .stat { background: #f9f9f9; padding: 15px; border-radius: 6px; text-align: center; }
         .stat-value { font-size: 24px; font-weight: bold; color: #667eea; }
         .stat-label { font-size: 12px; color: #999; margin-top: 5px; }
+
+        @media (max-width: 700px) {
+            .stat-box { grid-template-columns: repeat(2, 1fr); }
+            .input-group { grid-template-columns: 1fr; }
+            #apiUrl { width: 100% !important; }
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <div class="header">
             <h1>🐟 野烏金 POS 系統 - 後台管理</h1>
-            <p>API URL: <input type="text" id="apiUrl" value="https://janus-kings-pos-production.up.railway.app" style="width: 400px;"></p>
+            <p>API URL: <input type="text" id="apiUrl" value="" placeholder="留空 = 使用本站" style="width: 400px;"> <a href="/" target="_blank">開啟前台結帳 →</a></p>
         </div>
 
         <div class="tabs">
@@ -125,19 +131,22 @@
     </div>
 
     <script>
-        const API_URL = () => document.getElementById('apiUrl').value;
+        // 留空時使用本站（後台與 API 在同一個 Railway 服務）
+        const API_URL = () => document.getElementById('apiUrl').value.trim().replace(/\/$/, '') || window.location.origin;
+        let products = [];
 
-        // 硬編碼商品資料
-        const hardcodedProducts = [
-            { id: 1, name: '一口吃烏魚子-鹽味', price: 1280, gaoxiong: 50, taizhong: 30 },
-            { id: 2, name: '一口吃烏魚子-蜂蜜', price: 1380, gaoxiong: 40, taizhong: 25 },
-            { id: 3, name: '炭烤烏魚子-經典', price: 1580, gaoxiong: 35, taizhong: 20 },
-            { id: 4, name: '牛奶糖 6入', price: 210, gaoxiong: 100, taizhong: 80 },
-            { id: 5, name: '烏魚子禮盒-精選', price: 2980, gaoxiong: 20, taizhong: 15 },
-            { id: 6, name: '五味人生手拿盒', price: 399, gaoxiong: 60, taizhong: 40 },
-            { id: 7, name: '烏金經典組合', price: 3500, gaoxiong: 15, taizhong: 10 },
-            { id: 8, name: '烏魚子小禮包', price: 880, gaoxiong: 45, taizhong: 35 }
-        ];
+        // 讀取 API，失敗時丟出錯誤訊息
+        async function api(path, options) {
+            const res = await fetch(`${API_URL()}${path}`, options);
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.message || `HTTP ${res.status}`);
+            return data;
+        }
+
+        // 台灣時間的今天 YYYY-MM-DD
+        function today() {
+            return new Date().toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
+        }
 
         function showTab(tabName) {
             document.querySelectorAll('.content').forEach(c => c.classList.remove('active'));
@@ -145,21 +154,32 @@
             document.getElementById(tabName).classList.add('active');
             event.target.classList.add('active');
 
-            if (tabName === 'inventory') loadInventory();
+            if (tabName === 'dashboard') refreshDashboard();
+            else if (tabName === 'inventory') loadInventory();
             else if (tabName === 'sales') loadSalesRecords();
             else if (tabName === 'staff') loadStaffStats();
             else if (tabName === 'stocktake') loadStocktake();
         }
 
-        function loadInventory() {
-            const products = hardcodedProducts;
+        // 庫存為負數時用紅色顯示（代表賣出比登錄的庫存多）
+        const stockCell = (n) => `<td style="${n < 0 ? 'color:#e03131;font-weight:bold' : ''}">${n}</td>`;
 
-            // 填充下拉選單
+        async function loadInventory() {
+            try {
+                products = (await api('/api/inventory')).data;
+            } catch (error) {
+                alert('載入庫存失敗: ' + error.message);
+                return;
+            }
+
+            // 填充下拉選單（保留目前選擇）
             const select = document.getElementById('productSelect');
+            const selected = select.value;
             select.innerHTML = '<option value="">-- 選擇商品 --</option>';
             products.forEach(p => {
-                select.innerHTML += `<option value="${p.id}">${p.name}</option>`;
+                select.innerHTML += `<option value="${p.id}">${p.series}-${p.name}</option>`;
             });
+            select.value = selected;
 
             // 填充表格
             const tbody = document.querySelector('#inventoryTable tbody');
@@ -167,10 +187,10 @@
             products.forEach(p => {
                 tbody.innerHTML += `
                     <tr>
-                        <td>${p.name}</td>
-                        <td>${p.gaoxiong}</td>
-                        <td>${p.taizhong}</td>
-                        <td>${p.gaoxiong + p.taizhong}</td>
+                        <td>${p.series}-${p.name}</td>
+                        ${stockCell(p.gaoxiong)}
+                        ${stockCell(p.taizhong)}
+                        ${stockCell(p.gaoxiong + p.taizhong)}
                         <td>NT$${p.price}</td>
                     </tr>
                 `;
@@ -178,7 +198,10 @@
         }
 
         function loadProductDetails() {
-            // 根據選擇的商品填入數量
+            // 根據選擇的商品填入目前數量
+            const p = products.find(p => p.id === parseInt(document.getElementById('productSelect').value));
+            document.getElementById('gaoxiong').value = p ? p.gaoxiong : '';
+            document.getElementById('taizhong').value = p ? p.taizhong : '';
         }
 
         async function updateInventory() {
@@ -192,12 +215,11 @@
             }
 
             try {
-                const res = await fetch(`${API_URL()}/api/inventory/update`, {
+                await api('/api/inventory/update', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ product_id: parseInt(productId), gaoxiong, taizhong })
                 });
-                const data = await res.json();
                 alert('庫存已更新！');
                 loadInventory();
             } catch (error) {
@@ -207,19 +229,18 @@
 
         async function loadSalesRecords() {
             try {
-                const res = await fetch(`${API_URL()}/api/sales/records`);
-                const data = await res.json();
+                const data = await api('/api/sales/records');
                 const tbody = document.querySelector('#salesTable tbody');
                 tbody.innerHTML = '';
 
                 data.data.forEach(r => {
-                    const time = new Date(r.timestamp).toLocaleString('zh-TW');
+                    const time = new Date(r.timestamp).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
                     tbody.innerHTML += `
                         <tr>
                             <td>${time}</td>
                             <td>${r.product_name}</td>
                             <td>${r.quantity}</td>
-                            <td>NT$${r.total}</td>
+                            <td>NT$${r.total.toLocaleString()}</td>
                             <td>${r.store}</td>
                             <td>${r.staff}</td>
                         </tr>
@@ -232,8 +253,7 @@
 
         async function loadStaffStats() {
             try {
-                const res = await fetch(`${API_URL()}/api/staff/stats`);
-                const data = await res.json();
+                const data = await api('/api/staff/stats');
                 const tbody = document.querySelector('#staffTable tbody');
                 tbody.innerHTML = '';
 
@@ -242,7 +262,7 @@
                         <tr>
                             <td>${s.name}</td>
                             <td>${s.sales}</td>
-                            <td>NT$${s.amount}</td>
+                            <td>NT$${s.amount.toLocaleString()}</td>
                             <td>${s.gaoxiong}</td>
                             <td>${s.taizhong}</td>
                         </tr>
@@ -253,28 +273,31 @@
             }
         }
 
-        function loadStocktake() {
-            const tbody = document.querySelector('#stocktakeTable tbody');
-            tbody.innerHTML = '';
+        async function loadStocktake() {
+            try {
+                const data = await api('/api/stocktake');
+                const tbody = document.querySelector('#stocktakeTable tbody');
+                tbody.innerHTML = '';
 
-            hardcodedProducts.forEach(s => {
-                tbody.innerHTML += `
-                    <tr>
-                        <td>${s.name}</td>
-                        <td>${s.gaoxiong}</td>
-                        <td>${s.taizhong}</td>
-                        <td>${s.gaoxiong + s.taizhong}</td>
-                        <td>NT$${s.price}</td>
-                    </tr>
-                `;
-            });
+                data.data.forEach(s => {
+                    tbody.innerHTML += `
+                        <tr>
+                            <td>${s.name}</td>
+                            ${stockCell(s.gaoxiong)}
+                            ${stockCell(s.taizhong)}
+                            ${stockCell(s.total)}
+                            <td>NT$${s.price}</td>
+                        </tr>
+                    `;
+                });
+            } catch (error) {
+                alert('載入盤點紀錄失敗: ' + error.message);
+            }
         }
 
         async function refreshDashboard() {
             try {
-                const res = await fetch(`${API_URL()}/api/sales/records`);
-                const data = await res.json();
-                const records = data.data;
+                const records = (await api(`/api/sales/records?date=${today()}`)).data;
 
                 document.getElementById('totalSales').textContent = records.length;
                 const total = records.reduce((sum, r) => sum + r.total, 0);
@@ -283,8 +306,7 @@
                 const staffSet = new Set(records.map(r => r.staff));
                 document.getElementById('staffCount').textContent = staffSet.size;
 
-                const invRes = await fetch(`${API_URL()}/api/inventory`);
-                const invData = await invRes.json();
+                const invData = await api('/api/inventory');
                 const totalInv = invData.data.reduce((sum, p) => sum + p.gaoxiong + p.taizhong, 0);
                 document.getElementById('totalInventory').textContent = totalInv;
             } catch (error) {
