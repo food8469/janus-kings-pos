@@ -140,44 +140,38 @@
         let cart = {};
         let currentSeries = null;
 
-        const seriesData = [
-            {
-                id: 1,
-                name: '經典一口吃',
-                items: [
-                    { id: 101, name: '鹽味', price: 1280 },
-                    { id: 102, name: '紅酒', price: 1280 },
-                    { id: 103, name: '味噌', price: 1380 },
-                    { id: 104, name: '香辣', price: 1380 },
-                    { id: 105, name: '花雕', price: 1380 },
-                    { id: 106, name: '烏魚腱', price: 1280 }
-                ]
-            },
-            {
-                id: 2,
-                name: '頂規一口吃',
-                items: [
-                    { id: 201, name: '竹鹽', price: 1580 },
-                    { id: 202, name: '玫瑰紅酒', price: 1580 },
-                    { id: 203, name: '黑松露', price: 1580 },
-                    { id: 204, name: '瑤柱干貝', price: 1580 },
-                    { id: 205, name: '哇沙米', price: 1580 }
-                ]
-            },
-            {
-                id: 3,
-                name: '混搭款',
-                items: [
-                    { id: 301, name: '三珍', price: 1380 },
-                    { id: 302, name: '五珍', price: 1380 },
-                    { id: 303, name: '珍味', price: 1580 }
-                ]
+        // 商品從後台讀取（在後台「庫存管理」新增、修改、下架）
+        let seriesData = [];
+
+        async function loadProducts() {
+            const seriesView = document.getElementById('seriesView');
+            try {
+                const res = await fetch(`${API_URL()}/api/inventory`);
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.message || res.status);
+
+                // 依系列分組，只顯示上架中的商品
+                const groups = {};
+                data.data.filter(p => p.active).forEach(p => {
+                    if (!groups[p.series]) {
+                        groups[p.series] = { name: p.series, items: [] };
+                        seriesData.push(groups[p.series]);
+                    }
+                    groups[p.series].items.push({ id: p.id, name: p.name, price: p.price });
+                });
+                renderSeriesView();
+            } catch (error) {
+                seriesView.innerHTML = `<div class="message error">商品載入失敗：${error.message}，請重新整理頁面</div>`;
             }
-        ];
+        }
 
         function renderSeriesView() {
             const seriesView = document.getElementById('seriesView');
             seriesView.innerHTML = '';
+            if (!seriesData.length) {
+                seriesView.innerHTML = '<div class="message">目前沒有上架的商品，請到後台新增</div>';
+                return;
+            }
             seriesData.forEach(series => {
                 const card = document.createElement('div');
                 card.className = 'series-card';
@@ -339,7 +333,7 @@
         }
 
         // 初始化
-        renderSeriesView();
+        loadProducts();
         renderCart();
     </script>
 </body>

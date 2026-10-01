@@ -23,8 +23,9 @@ const pool = new Pool({
   ssl: DATABASE_URL.includes('.railway.internal') ? false : { rejectUnauthorized: false },
 });
 
-// ============ 商品（id 與 pos-checkout.html 的 seriesData 一致） ============
-// 新增或改價格：改這裡後重新部署即可。庫存不會被覆蓋，請在後台修改。
+// ============ 初始商品 ============
+// 只在資料庫還沒有這些商品時建立一次。之後新增、改價格、下架都在後台操作，
+// 改這裡不會覆蓋後台的修改。
 const PRODUCTS = [
   { id: 101, series: '經典一口吃', name: '鹽味', price: 1280 },
   { id: 102, series: '經典一口吃', name: '紅酒', price: 1280 },
@@ -67,15 +68,26 @@ async function initDb() {
       created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS sales_created_at_idx ON sales (created_at);
+    ALTER TABLE products ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
   `);
   for (const p of PRODUCTS) {
     await pool.query(
       `INSERT INTO products (id, series, name, price) VALUES ($1, $2, $3, $4)
-       ON CONFLICT (id) DO UPDATE SET series = EXCLUDED.series, name = EXCLUDED.name, price = EXCLUDED.price`,
+       ON CONFLICT (id) DO NOTHING`,
       [p.id, p.series, p.name, p.price]
     );
   }
 }
+
+// 數字欄位：空值回傳 null，非整數或負數丟出錯誤
+function toInt(value, label) {
+  if (value === undefined || value === null || value === '') return null;
+  const n = Number(value);
+  if (!Number.isInteger(n) || n < 0) throw new InputError(`${label}必須是 0 以上的整數`);
+  return n;
+}
+
+class InputError extends Error {}
 
 const app = express();
 app.use(cors());
@@ -125,6 +137,10 @@ app.post('/api/sales/create', async (req, res) => {
     if (!product) {
       await client.query('ROLLBACK');
       return res.status(404).json({ status: 'error', message: '商品不存在' });
+    }
+    if (!product.active) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ status: 'error', message: `${product.name} 已下架，請重新整理頁面` });
     }
 
     // 庫存不足仍可結帳（庫存會變負數，後台看得到），避免庫存沒登錄時店裡無法賣東西
@@ -213,6 +229,42 @@ app.post('/api/inventory/update', requireAdmin, async (req, res) => {
   res.json({ status: 'success', message: '庫存已更新', data: product });
 });
 
+// 8. 新增商品
+app.post('/api/products/create', requireAdmin, async (req, res) => {
+  const { series, name, price, gaoxiong, taizhong } = req.body || {};
+  const s = String(series || '').trim();
+  const n = String(name || '').trim();
+  if (!s || !n) return res.status(400).json({ status: 'error', message: '請填系列和品名' });
+  const p = toInt(price, '價格');
+  if (!p) return res.status(400).json({ status: 'error', message: '請填價格' });
+
+  const { rows: [dup] } = await pool.query(
+    'SELECT id FROM products WHERE series = $1 AND name = $2', [s, n]);
+  if (dup) return res.status(400).json({ status: 'error', message: `「${s}-${n}」已經存在` });
+
+  const { rows: [product] } = await pool.query(
+    `INSERT INTO products (id, series, name, price, gaoxiong, taizhong)
+     VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM products), $1, $2, $3, $4, $5)
+     RETURNING *`,
+    [s, n, p, toInt(gaoxiong, '高雄庫存') ?? 0, toInt(taizhong, '台中庫存') ?? 0]);
+  res.json({ status: 'success', message: '商品已新增', data: product });
+});
+
+// 9. 修改商品（系列、品名、價格、上架/下架）
+app.post('/api/products/update', requireAdmin, async (req, res) => {
+  const { product_id, series, name, price, active } = req.body || {};
+  const s = series === undefined ? null : String(series).trim() || null;
+  const n = name === undefined ? null : String(name).trim() || null;
+  const { rows: [product] } = await pool.query(
+    `UPDATE products
+     SET series = COALESCE($2, series), name = COALESCE($3, name),
+         price = COALESCE($4, price), active = COALESCE($5, active)
+     WHERE id = $1 RETURNING *`,
+    [product_id, s, n, toInt(price, '價格'), typeof active === 'boolean' ? active : null]);
+  if (!product) return res.status(404).json({ status: 'error', message: '商品不存在' });
+  res.json({ status: 'success', message: '商品已更新', data: product });
+});
+
 // 7. 健康檢查
 app.get('/health', async (req, res) => {
   await pool.query('SELECT 1');
@@ -221,6 +273,7 @@ app.get('/health', async (req, res) => {
 
 // 錯誤處理
 app.use((err, req, res, next) => {
+  if (err instanceof InputError) return res.status(400).json({ status: 'error', message: err.message });
   console.error(err);
   res.status(500).json({ status: 'error', message: '伺服器錯誤' });
 });

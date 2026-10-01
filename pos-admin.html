@@ -28,6 +28,13 @@
         .stat { background: #f9f9f9; padding: 15px; border-radius: 6px; text-align: center; }
         .stat-value { font-size: 24px; font-weight: bold; color: #667eea; }
         .stat-label { font-size: 12px; color: #999; margin-top: 5px; }
+        .section { border: 1px solid #eee; border-radius: 8px; padding: 15px; margin: 15px 0; }
+        .section h3 { font-size: 15px; margin-bottom: 5px; }
+        .section button { margin-right: 8px; }
+        button.secondary { background: #888; }
+        button:disabled { opacity: 0.4; cursor: not-allowed; }
+        .hint { font-size: 12px; color: #999; margin-top: 10px; }
+        tr.inactive td { color: #bbb; }
 
         @media (max-width: 700px) {
             .stat-box { grid-template-columns: repeat(2, 1fr); }
@@ -78,17 +85,42 @@
         <!-- 庫存管理 -->
         <div id="inventory" class="content">
             <h2>庫存管理</h2>
-            <div class="input-group">
-                <select id="productSelect" onchange="loadProductDetails()">
-                    <option value="">-- 選擇商品 --</option>
-                </select>
-                <input type="number" id="gaoxiong" placeholder="高雄庫存" min="0">
-                <input type="number" id="taizhong" placeholder="台中庫存" min="0">
+            <div class="section">
+                <h3>📦 修改庫存 / 商品資料</h3>
+                <div class="input-group">
+                    <select id="productSelect" onchange="loadProductDetails()">
+                        <option value="">-- 選擇商品 --</option>
+                    </select>
+                    <input type="number" id="gaoxiong" placeholder="高雄庫存" min="0">
+                    <input type="number" id="taizhong" placeholder="台中庫存" min="0">
+                </div>
+                <button onclick="updateInventory()">💾 保存庫存</button>
+                <div class="input-group">
+                    <input type="text" id="editSeries" placeholder="系列" list="seriesList">
+                    <input type="text" id="editName" placeholder="品名">
+                    <input type="number" id="editPrice" placeholder="價格" min="0">
+                </div>
+                <button onclick="updateProduct()">✏️ 保存商品資料</button>
+                <button id="toggleActiveBtn" class="secondary" onclick="toggleActive()" disabled>下架</button>
             </div>
-            <button onclick="updateInventory()">💾 保存庫存</button>
+
+            <div class="section">
+                <h3>➕ 新增商品</h3>
+                <div class="input-group">
+                    <input type="text" id="newSeries" placeholder="系列（例：經典一口吃）" list="seriesList">
+                    <input type="text" id="newName" placeholder="品名（例：梅子）">
+                    <input type="number" id="newPrice" placeholder="價格" min="0">
+                    <input type="number" id="newGaoxiong" placeholder="高雄庫存（可空白）" min="0">
+                    <input type="number" id="newTaizhong" placeholder="台中庫存（可空白）" min="0">
+                </div>
+                <button onclick="createProduct()">➕ 新增商品</button>
+                <p class="hint">系列可以選現有的，也可以打新的名字，前台會自動多一個系列。</p>
+            </div>
+            <datalist id="seriesList"></datalist>
+
             <table id="inventoryTable">
                 <thead>
-                    <tr><th>商品</th><th>高雄</th><th>台中</th><th>合計</th><th>單價</th></tr>
+                    <tr><th>商品</th><th>高雄</th><th>台中</th><th>合計</th><th>單價</th><th>狀態</th></tr>
                 </thead>
                 <tbody></tbody>
             </table>
@@ -178,31 +210,107 @@
             const selected = select.value;
             select.innerHTML = '<option value="">-- 選擇商品 --</option>';
             products.forEach(p => {
-                select.innerHTML += `<option value="${p.id}">${p.series}-${p.name}</option>`;
+                select.innerHTML += `<option value="${p.id}">${p.series}-${p.name}${p.active ? '' : '（已下架）'}</option>`;
             });
             select.value = selected;
+            loadProductDetails();
+
+            // 系列下拉建議
+            const seriesNames = [...new Set(products.map(p => p.series))];
+            document.getElementById('seriesList').innerHTML = seriesNames.map(s => `<option value="${s}">`).join('');
 
             // 填充表格
             const tbody = document.querySelector('#inventoryTable tbody');
             tbody.innerHTML = '';
             products.forEach(p => {
                 tbody.innerHTML += `
-                    <tr>
+                    <tr class="${p.active ? '' : 'inactive'}">
                         <td>${p.series}-${p.name}</td>
                         ${stockCell(p.gaoxiong)}
                         ${stockCell(p.taizhong)}
                         ${stockCell(p.gaoxiong + p.taizhong)}
                         <td>NT$${p.price}</td>
+                        <td>${p.active ? '上架中' : '已下架'}</td>
                     </tr>
                 `;
             });
         }
 
+        function selectedProduct() {
+            return products.find(p => p.id === parseInt(document.getElementById('productSelect').value));
+        }
+
         function loadProductDetails() {
-            // 根據選擇的商品填入目前數量
-            const p = products.find(p => p.id === parseInt(document.getElementById('productSelect').value));
+            // 根據選擇的商品填入目前數量與資料
+            const p = selectedProduct();
             document.getElementById('gaoxiong').value = p ? p.gaoxiong : '';
             document.getElementById('taizhong').value = p ? p.taizhong : '';
+            document.getElementById('editSeries').value = p ? p.series : '';
+            document.getElementById('editName').value = p ? p.name : '';
+            document.getElementById('editPrice').value = p ? p.price : '';
+            const btn = document.getElementById('toggleActiveBtn');
+            btn.disabled = !p;
+            btn.textContent = p && !p.active ? '重新上架' : '下架';
+        }
+
+        async function postJson(path, body) {
+            return api(path, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+        }
+
+        async function createProduct() {
+            const val = (id) => document.getElementById(id).value.trim();
+            if (!val('newSeries') || !val('newName') || !val('newPrice')) {
+                alert('請填系列、品名和價格');
+                return;
+            }
+            try {
+                await postJson('/api/products/create', {
+                    series: val('newSeries'),
+                    name: val('newName'),
+                    price: val('newPrice'),
+                    gaoxiong: val('newGaoxiong'),
+                    taizhong: val('newTaizhong')
+                });
+                alert(`已新增「${val('newSeries')}-${val('newName')}」，前台重新整理後就會出現`);
+                ['newSeries', 'newName', 'newPrice', 'newGaoxiong', 'newTaizhong']
+                    .forEach(id => document.getElementById(id).value = '');
+                loadInventory();
+            } catch (error) {
+                alert('新增失敗: ' + error.message);
+            }
+        }
+
+        async function updateProduct() {
+            const p = selectedProduct();
+            if (!p) { alert('請先選擇商品'); return; }
+            try {
+                await postJson('/api/products/update', {
+                    product_id: p.id,
+                    series: document.getElementById('editSeries').value,
+                    name: document.getElementById('editName').value,
+                    price: document.getElementById('editPrice').value
+                });
+                alert('商品資料已更新！');
+                loadInventory();
+            } catch (error) {
+                alert('更新失敗: ' + error.message);
+            }
+        }
+
+        async function toggleActive() {
+            const p = selectedProduct();
+            if (!p) return;
+            try {
+                await postJson('/api/products/update', { product_id: p.id, active: !p.active });
+                alert(p.active ? `「${p.name}」已下架，前台不會再顯示` : `「${p.name}」已重新上架`);
+                loadInventory();
+            } catch (error) {
+                alert('操作失敗: ' + error.message);
+            }
         }
 
         async function updateInventory() {
