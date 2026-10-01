@@ -265,6 +265,15 @@ app.post('/api/products/update', requireAdmin, async (req, res) => {
   res.json({ status: 'success', message: '商品已更新', data: product });
 });
 
+// 10. 刪除商品（銷售紀錄已存當時的品名與價格，不受影響）
+app.post('/api/products/delete', requireAdmin, async (req, res) => {
+  const { product_id } = req.body || {};
+  const { rows: [product] } = await pool.query(
+    'DELETE FROM products WHERE id = $1 RETURNING *', [product_id]);
+  if (!product) return res.status(404).json({ status: 'error', message: '商品不存在' });
+  res.json({ status: 'success', message: '商品已刪除', data: product });
+});
+
 // 7. 健康檢查
 app.get('/health', async (req, res) => {
   await pool.query('SELECT 1');

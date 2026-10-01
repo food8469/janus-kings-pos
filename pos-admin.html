@@ -32,6 +32,8 @@
         .section h3 { font-size: 15px; margin-bottom: 5px; }
         .section button { margin-right: 8px; }
         button.secondary { background: #888; }
+        button.danger { background: #ff6b6b; }
+        button.danger:hover { background: #e03131; }
         button:disabled { opacity: 0.4; cursor: not-allowed; }
         .hint { font-size: 12px; color: #999; margin-top: 10px; }
         tr.inactive td { color: #bbb; }
@@ -102,6 +104,7 @@
                 </div>
                 <button onclick="updateProduct()">✏️ 保存商品資料</button>
                 <button id="toggleActiveBtn" class="secondary" onclick="toggleActive()" disabled>下架</button>
+                <button id="deleteBtn" class="danger" onclick="deleteProduct()" disabled>🗑️ 刪除</button>
             </div>
 
             <div class="section">
@@ -251,6 +254,21 @@
             const btn = document.getElementById('toggleActiveBtn');
             btn.disabled = !p;
             btn.textContent = p && !p.active ? '重新上架' : '下架';
+            document.getElementById('deleteBtn').disabled = !p;
+        }
+
+        async function deleteProduct() {
+            const p = selectedProduct();
+            if (!p) return;
+            if (!confirm(`確定要刪除「${p.series}-${p.name}」嗎？\n\n刪除後無法復原（過去的銷售紀錄會保留）。\n只是暫時不賣的話，建議用「下架」。`)) return;
+            try {
+                await postJson('/api/products/delete', { product_id: p.id });
+                alert(`「${p.series}-${p.name}」已刪除`);
+                document.getElementById('productSelect').value = '';
+                loadInventory();
+            } catch (error) {
+                alert('刪除失敗: ' + error.message);
+            }
         }
 
         async function postJson(path, body) {
