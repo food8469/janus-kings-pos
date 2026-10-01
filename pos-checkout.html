@@ -25,6 +25,9 @@
         .product-card.selected { border-color: #667eea; background: #f0f4ff; }
         .product-name { font-weight: 600; margin: 10px 0 5px; font-size: 14px; }
         .product-price { color: #667eea; font-size: 16px; font-weight: bold; }
+        .product-stock { font-size: 12px; color: #2b8a3e; margin-top: 6px; }
+        .product-stock.low { color: #e67700; font-weight: bold; }
+        .product-stock.out { color: #e03131; font-weight: bold; }
         .back-btn { background: #667eea; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; margin-bottom: 15px; font-size: 14px; }
         .back-btn:hover { background: #5568d3; }
         .cart-item { background: white; padding: 12px; border-radius: 6px; margin: 8px 0; display: flex; justify-content: space-between; align-items: center; }
@@ -151,15 +154,22 @@
                 if (!res.ok) throw new Error(data.message || res.status);
 
                 // 依系列分組，只顯示上架中的商品
+                seriesData = [];
                 const groups = {};
                 data.data.filter(p => p.active).forEach(p => {
                     if (!groups[p.series]) {
                         groups[p.series] = { name: p.series, items: [] };
                         seriesData.push(groups[p.series]);
                     }
-                    groups[p.series].items.push({ id: p.id, name: p.name, price: p.price });
+                    groups[p.series].items.push({ id: p.id, name: p.name, price: p.price, gaoxiong: p.gaoxiong, taizhong: p.taizhong });
                 });
                 renderSeriesView();
+
+                // 品項視窗開著的話，換成最新庫存
+                if (currentSeries) {
+                    currentSeries = seriesData.find(s => s.name === currentSeries.name) || null;
+                    if (currentSeries) renderItemsView(); else closeItemModal();
+                }
             } catch (error) {
                 seriesView.innerHTML = `<div class="message error">商品載入失敗：${error.message}，請重新整理頁面</div>`;
             }
@@ -189,6 +199,7 @@
             document.getElementById('modalTitle').textContent = series.name;
             renderItemsView();
             document.getElementById('itemModal').style.display = 'block';
+            loadProducts(); // 抓最新庫存（其他門市或裝置可能剛賣出）
         }
 
         function renderItemsView() {
@@ -198,9 +209,17 @@
                 const card = document.createElement('div');
                 card.className = 'product-card';
                 if (cart[item.id]) card.classList.add('selected');
+                // 顯示目前選擇門市的庫存
+                const store = document.getElementById('store').value;
+                const stock = store === '高雄' ? item.gaoxiong : item.taizhong;
+                const inCart = cart[item.id] ? cart[item.id].qty : 0;
+                const stockClass = stock - inCart <= 0 ? 'out' : stock - inCart <= 5 ? 'low' : '';
                 card.innerHTML = `
                     <div class="product-name">${item.name}</div>
                     <div class="product-price">NT$${item.price}</div>
+                    <div class="product-stock ${stockClass}">
+                        ${store}庫存：${stock}${inCart ? `<br>結帳後剩 ${stock - inCart}` : ''}
+                    </div>
                 `;
                 card.onclick = () => {
                     addToCart(item);
@@ -313,6 +332,7 @@
                 cart = {};
                 document.getElementById('customerName').value = '';
                 renderCart();
+                loadProducts(); // 更新庫存數字
                 btn.disabled = false;
             } catch (error) {
                 showMessage('結帳失敗: ' + error.message, 'error');
