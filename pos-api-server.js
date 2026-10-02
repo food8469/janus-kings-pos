@@ -71,6 +71,17 @@ async function initDb() {
     ALTER TABLE products ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
     -- 大分類（試吃、一口吃、整片兩數…），原有商品預設為「一口吃」
     ALTER TABLE products ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT '一口吃';
+    -- 同一次結帳的品項共用一個單號
+    ALTER TABLE sales ADD COLUMN IF NOT EXISTS order_no TEXT;
+    -- 人員打卡
+    CREATE TABLE IF NOT EXISTS attendance (
+      id         SERIAL PRIMARY KEY,
+      staff      TEXT NOT NULL,
+      store      TEXT NOT NULL,
+      type       TEXT NOT NULL CHECK (type IN ('in', 'out')),
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS attendance_created_at_idx ON attendance (created_at);
   `);
   for (const p of PRODUCTS) {
     await pool.query(
@@ -123,7 +134,7 @@ app.get('/api/inventory', async (req, res) => {
 
 // 2. 銷售（結帳）
 app.post('/api/sales/create', async (req, res) => {
-  const { product_id, quantity, store, staff, customer_name } = req.body || {};
+  const { product_id, quantity, store, staff, customer_name, order_no } = req.body || {};
   const qty = parseInt(quantity, 10);
   const storeKey = STORE_KEYS[store];
 
@@ -150,10 +161,10 @@ app.post('/api/sales/create', async (req, res) => {
       `UPDATE products SET ${storeKey} = ${storeKey} - $1 WHERE id = $2`, [qty, product.id]);
 
     const { rows: [row] } = await client.query(
-      `INSERT INTO sales (product_id, product_name, price, quantity, total, store, staff, customer_name)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+      `INSERT INTO sales (product_id, product_name, price, quantity, total, store, staff, customer_name, order_no)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
       [product.id, `${product.series}-${product.name}`, product.price, qty, product.price * qty,
-       store, staff, (customer_name || '').trim() || '客人']
+       store, staff, (customer_name || '').trim() || '客人', String(order_no || '').slice(0, 40) || null]
     );
     await client.query('COMMIT');
 
@@ -177,8 +188,50 @@ function toRecord(r) {
     store: r.store,
     staff: r.staff,
     customer_name: r.customer_name,
+    order_no: r.order_no,
   };
 }
+
+// 台灣時間的「今天」條件
+const TODAY_SQL = `(created_at AT TIME ZONE 'Asia/Taipei')::date = (NOW() AT TIME ZONE 'Asia/Taipei')::date`;
+
+// 前台：今日結帳紀錄（只限今天、指定門市）
+app.get('/api/pos/sales/today', async (req, res) => {
+  if (!STORE_KEYS[req.query.store]) return res.status(400).json({ status: 'error', message: '門市錯誤' });
+  const { rows } = await pool.query(
+    `SELECT * FROM sales WHERE ${TODAY_SQL} AND store = $1 ORDER BY created_at DESC LIMIT 500`,
+    [req.query.store]);
+  res.json({ status: 'success', data: rows.map(toRecord) });
+});
+
+// 前台：打卡
+app.post('/api/attendance/punch', async (req, res) => {
+  const { staff, store, type } = req.body || {};
+  if (!String(staff || '').trim()) return res.status(400).json({ status: 'error', message: '請選擇人員' });
+  if (!STORE_KEYS[store]) return res.status(400).json({ status: 'error', message: '門市錯誤' });
+  if (!['in', 'out'].includes(type)) return res.status(400).json({ status: 'error', message: '打卡類型錯誤' });
+  const { rows: [row] } = await pool.query(
+    'INSERT INTO attendance (staff, store, type) VALUES ($1, $2, $3) RETURNING *',
+    [String(staff).trim(), store, type]);
+  res.json({ status: 'success', message: type === 'in' ? '上班打卡成功' : '下班打卡成功', data: row });
+});
+
+// 前台：今日打卡紀錄（指定門市）
+app.get('/api/attendance/today', async (req, res) => {
+  if (!STORE_KEYS[req.query.store]) return res.status(400).json({ status: 'error', message: '門市錯誤' });
+  const { rows } = await pool.query(
+    `SELECT * FROM attendance WHERE ${TODAY_SQL} AND store = $1 ORDER BY created_at DESC`,
+    [req.query.store]);
+  res.json({ status: 'success', data: rows });
+});
+
+// 後台：打卡紀錄（?month=YYYY-MM）
+app.get('/api/attendance', requireAdmin, async (req, res) => {
+  const { sql, params } = dateFilter(req.query);
+  const { rows } = await pool.query(
+    `SELECT * FROM attendance ${sql} ORDER BY created_at LIMIT 5000`, params);
+  res.json({ status: 'success', data: rows });
+});
 
 // 日期篩選（台灣時間）：?date=YYYY-MM-DD 或 ?month=YYYY-MM
 function dateFilter(q) {

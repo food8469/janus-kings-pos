@@ -63,6 +63,37 @@
         @media (max-width: 600px) {
             .product-grid { grid-template-columns: 1fr; }
         }
+
+        /* ===== 漢堡選單側邊面板 ===== */
+        .menu-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 1000; }
+        .menu-drawer { position: absolute; top: 0; right: 0; bottom: 0; width: min(480px, 100%); background: #f9f9f9; display: flex; flex-direction: column; box-shadow: -4px 0 20px rgba(0,0,0,0.2); }
+        .menu-head { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 18px 20px; display: flex; justify-content: space-between; align-items: center; }
+        .menu-head h2 { font-size: 20px; }
+        .menu-head button { background: none; border: none; color: white; font-size: 26px; cursor: pointer; }
+        .menu-tabs { display: flex; border-bottom: 2px solid #ddd; background: white; }
+        .menu-tab { flex: 1; padding: 14px; background: none; border: none; font-size: 15px; font-weight: bold; color: #888; cursor: pointer; font-family: inherit; border-bottom: 3px solid transparent; margin-bottom: -2px; }
+        .menu-tab.active { color: #667eea; border-bottom-color: #667eea; }
+        .menu-body { flex: 1; overflow-y: auto; padding: 18px 20px; }
+        .menu-store { display: flex; align-items: center; gap: 10px; margin-bottom: 15px; font-size: 14px; }
+        .menu-store select { width: auto; flex: 1; }
+        .punch-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 12px 0; }
+        .punch-btn { padding: 16px; border: none; border-radius: 8px; font-size: 17px; font-weight: bold; color: white; cursor: pointer; font-family: inherit; }
+        .punch-btn.in { background: #2b8a3e; }
+        .punch-btn.out { background: #e67700; }
+        .punch-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .list-title { font-size: 14px; font-weight: bold; color: #555; margin: 18px 0 8px; }
+        .list-row { background: white; border-radius: 6px; padding: 10px 12px; margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center; font-size: 14px; }
+        .tag { font-size: 12px; padding: 2px 8px; border-radius: 10px; color: white; }
+        .tag.in { background: #2b8a3e; }
+        .tag.out { background: #e67700; }
+        .order-card { background: white; border-radius: 8px; padding: 12px; margin-bottom: 10px; font-size: 14px; }
+        .order-head { display: flex; justify-content: space-between; color: #888; font-size: 12px; margin-bottom: 6px; }
+        .order-line { display: flex; justify-content: space-between; padding: 2px 0; }
+        .order-total { border-top: 1px solid #eee; margin-top: 6px; padding-top: 6px; display: flex; justify-content: space-between; font-weight: bold; color: #667eea; }
+        .day-summary { background: white; border-radius: 8px; padding: 14px; display: flex; justify-content: space-around; text-align: center; }
+        .day-summary b { display: block; font-size: 20px; color: #667eea; }
+        .day-summary span { font-size: 12px; color: #999; }
+        .empty { color: #999; font-size: 14px; text-align: center; padding: 20px 0; }
     </style>
 </head>
 <body>
@@ -73,7 +104,7 @@
                     <h1>🐟 野烏金 POS</h1>
                     <p style="font-size: 12px; margin-top: 10px;">API: <input type="text" id="apiUrl" value="" style="width: 300px; padding: 5px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.5); color: white;" placeholder="留空 = 使用本站"></p>
                 </div>
-                <button class="menu-btn" onclick="toggleCart()">☰</button>
+                <button class="menu-btn" onclick="openMenu()">☰</button>
             </div>
 
             <!-- 大分類 -->
@@ -140,6 +171,50 @@
 
                 <button class="checkout-btn" onclick="checkout()">✓ 完成結帳</button>
                 <div id="message"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 漢堡選單：人員打卡 / 結帳紀錄 -->
+    <div id="menuOverlay" class="menu-overlay" hidden onclick="if (event.target === this) closeMenu()">
+        <div class="menu-drawer">
+            <div class="menu-head">
+                <h2>☰ 選單</h2>
+                <button onclick="closeMenu()">✕</button>
+            </div>
+            <div class="menu-tabs">
+                <button class="menu-tab active" data-tab="punch" onclick="showMenuTab('punch')">🕐 人員打卡</button>
+                <button class="menu-tab" data-tab="orders" onclick="showMenuTab('orders')">🧾 結帳紀錄</button>
+            </div>
+            <div class="menu-body">
+                <div class="menu-store">
+                    <label>門市</label>
+                    <select id="menuStore" onchange="changeMenuStore(this.value)">
+                        <option value="高雄">高雄</option>
+                        <option value="台中">台中</option>
+                    </select>
+                </div>
+
+                <div id="punchPanel">
+                    <select id="punchStaff"></select>
+                    <div class="punch-buttons">
+                        <button class="punch-btn in" onclick="punch('in')">🟢 上班打卡</button>
+                        <button class="punch-btn out" onclick="punch('out')">🟠 下班打卡</button>
+                    </div>
+                    <div id="punchMessage"></div>
+                    <div class="list-title">今日打卡紀錄</div>
+                    <div id="punchList"></div>
+                </div>
+
+                <div id="ordersPanel" hidden>
+                    <div class="day-summary">
+                        <div><b id="dayOrders">0</b><span>今日結帳筆數</span></div>
+                        <div><b id="dayQty">0</b><span>商品件數</span></div>
+                        <div><b id="dayAmount">NT$0</b><span>今日營業額</span></div>
+                    </div>
+                    <div class="list-title">今日結帳明細（最新的在最上面）</div>
+                    <div id="orderList"></div>
+                </div>
             </div>
         </div>
     </div>
@@ -333,6 +408,9 @@
             const btn = event.target;
             btn.disabled = true;
 
+            // 同一次結帳的品項共用單號，結帳紀錄會合成一張單
+            const orderNo = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+
             try {
                 for (const [productId, item] of Object.entries(cart)) {
                     const res = await fetch(`${API_URL()}/api/sales/create`, {
@@ -343,7 +421,8 @@
                             quantity: item.qty,
                             store: store,
                             staff: staff,
-                            customer_name: customerName
+                            customer_name: customerName,
+                            order_no: orderNo
                         })
                     });
 
@@ -379,7 +458,125 @@
             cartPanel.classList.toggle('show');
         }
 
-        // 初始化
+        // ============ 漢堡選單：人員打卡 / 結帳紀錄 ============
+        let menuTab = 'punch';
+        const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        const timeOf = (t) => new Date(t).toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false });
+
+        async function getJson(path) {
+            const res = await fetch(`${API_URL()}${path}`);
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.message || res.status);
+            return data.data;
+        }
+
+        function openMenu() {
+            // 門市、人員預設跟結帳區一樣
+            document.getElementById('menuStore').value = document.getElementById('store').value;
+            const punchStaff = document.getElementById('punchStaff');
+            punchStaff.innerHTML = document.getElementById('staff').innerHTML;
+            punchStaff.value = document.getElementById('staff').value;
+            document.getElementById('menuOverlay').hidden = false;
+            showMenuTab(menuTab);
+        }
+
+        function closeMenu() {
+            document.getElementById('menuOverlay').hidden = true;
+        }
+
+        function showMenuTab(tab) {
+            menuTab = tab;
+            document.querySelectorAll('.menu-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+            document.getElementById('punchPanel').hidden = tab !== 'punch';
+            document.getElementById('ordersPanel').hidden = tab !== 'orders';
+            if (tab === 'punch') loadPunches(); else loadOrders();
+        }
+
+        function changeMenuStore(store) {
+            document.getElementById('store').value = store; // 結帳區門市一起切換
+            showMenuTab(menuTab);
+        }
+
+        async function punch(type) {
+            const staff = document.getElementById('punchStaff').value;
+            const store = document.getElementById('menuStore').value;
+            const msg = document.getElementById('punchMessage');
+            if (!staff) {
+                msg.className = 'message error';
+                msg.textContent = '請先選擇人員';
+                return;
+            }
+            document.querySelectorAll('.punch-btn').forEach(b => b.disabled = true);
+            try {
+                const res = await fetch(`${API_URL()}/api/attendance/punch`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ staff, store, type })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.message);
+                msg.className = 'message success';
+                msg.textContent = `✓ ${staff} ${type === 'in' ? '上班' : '下班'}打卡成功（${timeOf(data.data.created_at)}）`;
+                loadPunches();
+            } catch (error) {
+                msg.className = 'message error';
+                msg.textContent = '打卡失敗：' + error.message;
+            } finally {
+                document.querySelectorAll('.punch-btn').forEach(b => b.disabled = false);
+            }
+        }
+
+        async function loadPunches() {
+            const list = document.getElementById('punchList');
+            try {
+                const rows = await getJson(`/api/attendance/today?store=${encodeURIComponent(document.getElementById('menuStore').value)}`);
+                list.innerHTML = rows.length ? rows.map(r => `
+                    <div class="list-row">
+                        <span>${timeOf(r.created_at)}　${esc(r.staff)}</span>
+                        <span class="tag ${r.type}">${r.type === 'in' ? '上班' : '下班'}</span>
+                    </div>`).join('') : '<div class="empty">今天還沒有人打卡</div>';
+            } catch (error) {
+                list.innerHTML = `<div class="message error">載入失敗：${esc(error.message)}</div>`;
+            }
+        }
+
+        async function loadOrders() {
+            const list = document.getElementById('orderList');
+            try {
+                const rows = await getJson(`/api/pos/sales/today?store=${encodeURIComponent(document.getElementById('menuStore').value)}`);
+
+                // 同單號的品項合成一張單（舊紀錄沒有單號就各自一張）
+                const orders = [];
+                rows.forEach(r => {
+                    let o = r.order_no && orders.find(o => o.no === r.order_no);
+                    if (!o) orders.push(o = { no: r.order_no, time: r.timestamp, staff: r.staff, customer: r.customer_name, lines: [], total: 0 });
+                    o.lines.push(r);
+                    o.total += r.total;
+                });
+
+                document.getElementById('dayOrders').textContent = orders.length;
+                document.getElementById('dayQty').textContent = rows.reduce((s, r) => s + r.quantity, 0);
+                document.getElementById('dayAmount').textContent = 'NT$' + rows.reduce((s, r) => s + r.total, 0).toLocaleString();
+
+                list.innerHTML = orders.length ? orders.map(o => `
+                    <div class="order-card">
+                        <div class="order-head">
+                            <span>🕐 ${timeOf(o.time)}　👤 ${esc(o.staff)}</span>
+                            <span>${esc(o.customer)}</span>
+                        </div>
+                        ${o.lines.map(l => `
+                            <div class="order-line">
+                                <span>${esc(l.product_name)} × ${l.quantity}</span>
+                                <span>NT$${l.total.toLocaleString()}</span>
+                            </div>`).join('')}
+                        <div class="order-total"><span>合計</span><span>NT$${o.total.toLocaleString()}</span></div>
+                    </div>`).join('') : '<div class="empty">今天還沒有結帳紀錄</div>';
+            } catch (error) {
+                list.innerHTML = `<div class="message error">載入失敗：${esc(error.message)}</div>`;
+            }
+        }
+
+        // 初始化：載入商品
         loadProducts();
         renderCart();
     </script>

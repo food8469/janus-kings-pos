@@ -81,6 +81,25 @@
             <button class="tab-btn" onclick="showTab('sales')">💰 交易紀錄</button>
             <button class="tab-btn" onclick="showTab('staff')">👥 員工統計</button>
             <button class="tab-btn" onclick="showTab('stocktake')">📋 盤點紀錄</button>
+            <button class="tab-btn" onclick="showTab('attendance')">🕐 打卡紀錄</button>
+        </div>
+
+        <!-- 打卡紀錄 -->
+        <div id="attendance" class="content">
+            <h2>打卡紀錄</h2>
+            <div class="filter-bar" style="align-items: center;">
+                <label>月份 <input type="month" id="attendanceMonth" onchange="loadAttendance()"></label>
+                <select id="attendanceStaff" onchange="renderAttendance()"><option value="">全部人員</option></select>
+                <button onclick="loadAttendance()">🔄 重新整理</button>
+            </div>
+            <div id="attendanceSummary" class="stat-box"></div>
+            <table id="attendanceTable">
+                <thead>
+                    <tr><th>日期</th><th>人員</th><th>門市</th><th>上班</th><th>下班</th><th>工時</th></tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+            <p class="hint">同一天以「最早的上班」到「最晚的下班」計算工時。沒打到的會顯示「未打卡」。</p>
         </div>
 
         <!-- 儀表板 -->
@@ -234,6 +253,64 @@
             else if (tabName === 'sales') loadSalesRecords();
             else if (tabName === 'staff') loadStaffStats();
             else if (tabName === 'stocktake') loadStocktake();
+            else if (tabName === 'attendance') loadAttendance();
+        }
+
+        // ============ 打卡紀錄 ============
+        let attendanceDays = [];
+
+        async function loadAttendance() {
+            const monthInput = document.getElementById('attendanceMonth');
+            if (!monthInput.value) monthInput.value = today().slice(0, 7);
+            try {
+                const rows = (await api(`/api/attendance?month=${monthInput.value}`)).data;
+
+                // 每人每天合成一列：最早上班、最晚下班
+                const map = {};
+                rows.forEach(r => {
+                    const date = new Date(r.created_at).toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
+                    const key = `${date}|${r.staff}`;
+                    const d = map[key] || (map[key] = { date, staff: r.staff, stores: new Set(), in: null, out: null });
+                    d.stores.add(r.store);
+                    const t = new Date(r.created_at);
+                    if (r.type === 'in' && (!d.in || t < d.in)) d.in = t;
+                    if (r.type === 'out' && (!d.out || t > d.out)) d.out = t;
+                });
+                attendanceDays = Object.values(map).sort((a, b) => b.date.localeCompare(a.date) || a.staff.localeCompare(b.staff));
+
+                const staffSelect = document.getElementById('attendanceStaff');
+                const current = staffSelect.value;
+                staffSelect.innerHTML = '<option value="">全部人員</option>' +
+                    [...new Set(attendanceDays.map(d => d.staff))].map(s => `<option>${s}</option>`).join('');
+                staffSelect.value = current;
+                renderAttendance();
+            } catch (error) {
+                alert('載入打卡紀錄失敗: ' + error.message);
+            }
+        }
+
+        function renderAttendance() {
+            const staff = document.getElementById('attendanceStaff').value;
+            const days = attendanceDays.filter(d => !staff || d.staff === staff);
+            const time = (t) => t ? t.toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false })
+                                  : '<span style="color:#e03131">未打卡</span>';
+            const hours = (d) => d.in && d.out && d.out > d.in ? (d.out - d.in) / 3600000 : null;
+
+            document.querySelector('#attendanceTable tbody').innerHTML = days.length ? days.map(d => `
+                <tr>
+                    <td>${d.date}</td>
+                    <td>${d.staff}</td>
+                    <td>${[...d.stores].join('、')}</td>
+                    <td>${time(d.in)}</td>
+                    <td>${time(d.out)}</td>
+                    <td>${hours(d) === null ? '-' : hours(d).toFixed(1) + ' 小時'}</td>
+                </tr>`).join('') : '<tr><td colspan="6" style="color:#999">這個月沒有打卡紀錄</td></tr>';
+
+            const totalHours = days.reduce((s, d) => s + (hours(d) || 0), 0);
+            document.getElementById('attendanceSummary').innerHTML = `
+                <div class="stat"><div class="stat-value">${days.length}</div><div class="stat-label">出勤人次</div></div>
+                <div class="stat"><div class="stat-value">${totalHours.toFixed(1)}</div><div class="stat-label">總工時（小時）</div></div>
+                <div class="stat"><div class="stat-value">${days.filter(d => !d.in || !d.out).length}</div><div class="stat-label">漏打卡</div></div>`;
         }
 
         // 庫存為負數時用紅色顯示（代表賣出比登錄的庫存多）
