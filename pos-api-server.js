@@ -82,6 +82,7 @@ async function initDb() {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS attendance_created_at_idx ON attendance (created_at);
+    ALTER TABLE attendance ADD COLUMN IF NOT EXISTS note TEXT;
   `);
   for (const p of PRODUCTS) {
     await pool.query(
@@ -206,13 +207,13 @@ app.get('/api/pos/sales/today', async (req, res) => {
 
 // 前台：打卡
 app.post('/api/attendance/punch', async (req, res) => {
-  const { staff, store, type } = req.body || {};
+  const { staff, store, type, note } = req.body || {};
   if (!String(staff || '').trim()) return res.status(400).json({ status: 'error', message: '請選擇人員' });
   if (!STORE_KEYS[store]) return res.status(400).json({ status: 'error', message: '門市錯誤' });
   if (!['in', 'out'].includes(type)) return res.status(400).json({ status: 'error', message: '打卡類型錯誤' });
   const { rows: [row] } = await pool.query(
-    'INSERT INTO attendance (staff, store, type) VALUES ($1, $2, $3) RETURNING *',
-    [String(staff).trim(), store, type]);
+    'INSERT INTO attendance (staff, store, type, note) VALUES ($1, $2, $3, $4) RETURNING *',
+    [String(staff).trim(), store, type, String(note || '').trim().slice(0, 200) || null]);
   res.json({ status: 'success', message: type === 'in' ? '上班打卡成功' : '下班打卡成功', data: row });
 });
 
