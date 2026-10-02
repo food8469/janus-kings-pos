@@ -69,6 +69,8 @@ async function initDb() {
     );
     CREATE INDEX IF NOT EXISTS sales_created_at_idx ON sales (created_at);
     ALTER TABLE products ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
+    -- 大分類（試吃、一口吃、整片兩數…），原有商品預設為「一口吃」
+    ALTER TABLE products ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT '一口吃';
   `);
   for (const p of PRODUCTS) {
     await pool.query(
@@ -211,7 +213,7 @@ app.get('/api/staff/stats', requireAdmin, async (req, res) => {
 // 5. 盤點紀錄（目前庫存狀態）
 app.get('/api/stocktake', requireAdmin, async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT id, series || '-' || name AS name, gaoxiong, taizhong,
+    `SELECT id, category, series || '-' || name AS name, gaoxiong, taizhong,
             gaoxiong + taizhong AS total, price
      FROM products ORDER BY id`);
   res.json({ status: 'success', data: rows });
@@ -231,36 +233,39 @@ app.post('/api/inventory/update', requireAdmin, async (req, res) => {
 
 // 8. 新增商品
 app.post('/api/products/create', requireAdmin, async (req, res) => {
-  const { series, name, price, gaoxiong, taizhong } = req.body || {};
+  const { category, series, name, price, gaoxiong, taizhong } = req.body || {};
+  const c = String(category || '').trim();
   const s = String(series || '').trim();
   const n = String(name || '').trim();
-  if (!s || !n) return res.status(400).json({ status: 'error', message: '請填系列和品名' });
+  if (!c || !s || !n) return res.status(400).json({ status: 'error', message: '請填大分類、系列和品名' });
   const p = toInt(price, '價格');
-  if (!p) return res.status(400).json({ status: 'error', message: '請填價格' });
+  // 價格可以是 0（例如試吃品，只扣庫存不收錢）
+  if (p === null) return res.status(400).json({ status: 'error', message: '請填價格' });
 
   const { rows: [dup] } = await pool.query(
     'SELECT id FROM products WHERE series = $1 AND name = $2', [s, n]);
   if (dup) return res.status(400).json({ status: 'error', message: `「${s}-${n}」已經存在` });
 
   const { rows: [product] } = await pool.query(
-    `INSERT INTO products (id, series, name, price, gaoxiong, taizhong)
-     VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM products), $1, $2, $3, $4, $5)
+    `INSERT INTO products (id, category, series, name, price, gaoxiong, taizhong)
+     VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM products), $1, $2, $3, $4, $5, $6)
      RETURNING *`,
-    [s, n, p, toInt(gaoxiong, '高雄庫存') ?? 0, toInt(taizhong, '台中庫存') ?? 0]);
+    [c, s, n, p, toInt(gaoxiong, '高雄庫存') ?? 0, toInt(taizhong, '台中庫存') ?? 0]);
   res.json({ status: 'success', message: '商品已新增', data: product });
 });
 
-// 9. 修改商品（系列、品名、價格、上架/下架）
+// 9. 修改商品（大分類、系列、品名、價格、上架/下架）
 app.post('/api/products/update', requireAdmin, async (req, res) => {
-  const { product_id, series, name, price, active } = req.body || {};
-  const s = series === undefined ? null : String(series).trim() || null;
-  const n = name === undefined ? null : String(name).trim() || null;
+  const { product_id, category, series, name, price, active } = req.body || {};
+  const text = (v) => (v === undefined ? null : String(v).trim() || null);
   const { rows: [product] } = await pool.query(
     `UPDATE products
      SET series = COALESCE($2, series), name = COALESCE($3, name),
-         price = COALESCE($4, price), active = COALESCE($5, active)
+         price = COALESCE($4, price), active = COALESCE($5, active),
+         category = COALESCE($6, category)
      WHERE id = $1 RETURNING *`,
-    [product_id, s, n, toInt(price, '價格'), typeof active === 'boolean' ? active : null]);
+    [product_id, text(series), text(name), toInt(price, '價格'),
+     typeof active === 'boolean' ? active : null, text(category)]);
   if (!product) return res.status(404).json({ status: 'error', message: '商品不存在' });
   res.json({ status: 'success', message: '商品已更新', data: product });
 });

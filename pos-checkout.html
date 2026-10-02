@@ -25,6 +25,9 @@
         .product-card.selected { border-color: #667eea; background: #f0f4ff; }
         .product-name { font-weight: 600; margin: 10px 0 5px; font-size: 14px; }
         .product-price { color: #667eea; font-size: 16px; font-weight: bold; }
+        .category-tabs { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px; }
+        .category-tab { padding: 12px 24px; background: white; color: #555; border: 2px solid #ddd; border-radius: 24px; font-size: 16px; font-weight: bold; cursor: pointer; font-family: inherit; }
+        .category-tab.active { background: #667eea; color: white; border-color: #667eea; }
         .product-stock { font-size: 12px; color: #2b8a3e; margin-top: 6px; }
         .product-stock.low { color: #e67700; font-weight: bold; }
         .product-stock.out { color: #e03131; font-weight: bold; }
@@ -72,6 +75,9 @@
                 </div>
                 <button class="menu-btn" onclick="toggleCart()">☰</button>
             </div>
+
+            <!-- 大分類 -->
+            <div id="categoryTabs" class="category-tabs"></div>
 
             <!-- 系列列表視圖 -->
             <div id="seriesView" class="product-grid" style="display: grid;"></div>
@@ -145,6 +151,7 @@
 
         // 商品從後台讀取（在後台「庫存管理」新增、修改、下架）
         let seriesData = [];
+        let currentCategory = '';
 
         async function loadProducts() {
             const seriesView = document.getElementById('seriesView');
@@ -153,21 +160,22 @@
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.message || res.status);
 
-                // 依系列分組，只顯示上架中的商品
+                // 依大分類 + 系列分組，只顯示上架中的商品
                 seriesData = [];
                 const groups = {};
                 data.data.filter(p => p.active).forEach(p => {
-                    if (!groups[p.series]) {
-                        groups[p.series] = { name: p.series, items: [] };
-                        seriesData.push(groups[p.series]);
+                    const key = `${p.category}|${p.series}`;
+                    if (!groups[key]) {
+                        groups[key] = { category: p.category, name: p.series, items: [] };
+                        seriesData.push(groups[key]);
                     }
-                    groups[p.series].items.push({ id: p.id, name: p.name, price: p.price, gaoxiong: p.gaoxiong, taizhong: p.taizhong });
+                    groups[key].items.push({ id: p.id, name: p.name, price: p.price, gaoxiong: p.gaoxiong, taizhong: p.taizhong });
                 });
                 renderSeriesView();
 
                 // 品項視窗開著的話，換成最新庫存
                 if (currentSeries) {
-                    currentSeries = seriesData.find(s => s.name === currentSeries.name) || null;
+                    currentSeries = seriesData.find(s => s.category === currentSeries.category && s.name === currentSeries.name) || null;
                     if (currentSeries) renderItemsView(); else closeItemModal();
                 }
             } catch (error) {
@@ -175,14 +183,33 @@
             }
         }
 
+        function selectCategory(category) {
+            currentCategory = category;
+            renderSeriesView();
+        }
+
         function renderSeriesView() {
             const seriesView = document.getElementById('seriesView');
+            const tabs = document.getElementById('categoryTabs');
             seriesView.innerHTML = '';
+            tabs.innerHTML = '';
             if (!seriesData.length) {
                 seriesView.innerHTML = '<div class="message">目前沒有上架的商品，請到後台新增</div>';
                 return;
             }
-            seriesData.forEach(series => {
+
+            // 大分類按鈕（預設選第一個；分類被刪掉時也回到第一個）
+            const categories = [...new Set(seriesData.map(s => s.category))];
+            if (!categories.includes(currentCategory)) currentCategory = categories[0];
+            categories.forEach(c => {
+                const btn = document.createElement('button');
+                btn.className = 'category-tab' + (c === currentCategory ? ' active' : '');
+                btn.textContent = c;
+                btn.onclick = () => selectCategory(c);
+                tabs.appendChild(btn);
+            });
+
+            seriesData.filter(s => s.category === currentCategory).forEach(series => {
                 const card = document.createElement('div');
                 card.className = 'series-card';
                 card.innerHTML = `

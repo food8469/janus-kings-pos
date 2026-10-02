@@ -20,7 +20,7 @@
         th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
         th { background: #f9f9f9; font-weight: 600; }
         tr:hover { background: #f9f9f9; }
-        .input-group { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin: 15px 0; }
+        .input-group { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin: 15px 0; }
         input, select { padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; }
         button { padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
         button:hover { background: #5568d3; }
@@ -37,6 +37,11 @@
         button:disabled { opacity: 0.4; cursor: not-allowed; }
         .hint { font-size: 12px; color: #999; margin-top: 10px; }
         tr.inactive td { color: #bbb; }
+        tr.group-row td { background: #eef1ff; color: #4c5bd4; font-weight: bold; }
+        tr.group-row:hover td { background: #eef1ff; }
+        .filter-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 20px; }
+        .filter-bar button { background: white; color: #555; border: 2px solid #ddd; padding: 6px 14px; }
+        .filter-bar button.active { background: #667eea; color: white; border-color: #667eea; }
 
         @media (max-width: 700px) {
             .stat-box { grid-template-columns: repeat(2, 1fr); }
@@ -98,6 +103,7 @@
                 </div>
                 <button onclick="updateInventory()">💾 保存庫存</button>
                 <div class="input-group">
+                    <input type="text" id="editCategory" placeholder="大分類" list="categoryList">
                     <input type="text" id="editSeries" placeholder="系列" list="seriesList">
                     <input type="text" id="editName" placeholder="品名">
                     <input type="number" id="editPrice" placeholder="價格" min="0">
@@ -110,6 +116,7 @@
             <div class="section">
                 <h3>➕ 新增商品</h3>
                 <div class="input-group">
+                    <input type="text" id="newCategory" placeholder="大分類（例：一口吃、試吃、整片兩數）" list="categoryList">
                     <input type="text" id="newSeries" placeholder="系列（例：經典一口吃）" list="seriesList">
                     <input type="text" id="newName" placeholder="品名（例：梅子）">
                     <input type="number" id="newPrice" placeholder="價格" min="0">
@@ -117,10 +124,12 @@
                     <input type="number" id="newTaizhong" placeholder="台中庫存（可空白）" min="0">
                 </div>
                 <button onclick="createProduct()">➕ 新增商品</button>
-                <p class="hint">系列可以選現有的，也可以打新的名字，前台會自動多一個系列。</p>
+                <p class="hint">大分類、系列都可以選現有的，也可以打新的名字，前台會自動多出來。試吃品價格可以填 0。</p>
             </div>
+            <datalist id="categoryList"></datalist>
             <datalist id="seriesList"></datalist>
 
+            <div id="categoryFilter" class="filter-bar"></div>
             <table id="inventoryTable">
                 <thead>
                     <tr><th>商品</th><th>高雄</th><th>台中</th><th>合計</th><th>單價</th><th>狀態</th></tr>
@@ -208,25 +217,34 @@
                 return;
             }
 
-            // 填充下拉選單（保留目前選擇）
+            const groups = groupByCategory(products);
+
+            // 填充下拉選單（依大分類分組，保留目前選擇）
             const select = document.getElementById('productSelect');
             const selected = select.value;
-            select.innerHTML = '<option value="">-- 選擇商品 --</option>';
-            products.forEach(p => {
-                select.innerHTML += `<option value="${p.id}">${p.series}-${p.name}${p.active ? '' : '（已下架）'}</option>`;
-            });
+            select.innerHTML = '<option value="">-- 選擇商品 --</option>' + groups.map(g => `
+                <optgroup label="${g.category}">
+                    ${g.items.map(p => `<option value="${p.id}">${p.series}-${p.name}${p.active ? '' : '（已下架）'}</option>`).join('')}
+                </optgroup>`).join('');
             select.value = selected;
             loadProductDetails();
 
-            // 系列下拉建議
-            const seriesNames = [...new Set(products.map(p => p.series))];
-            document.getElementById('seriesList').innerHTML = seriesNames.map(s => `<option value="${s}">`).join('');
+            // 大分類、系列的輸入建議
+            const options = (list) => [...new Set(list)].map(v => `<option value="${v}">`).join('');
+            document.getElementById('categoryList').innerHTML = options(products.map(p => p.category));
+            document.getElementById('seriesList').innerHTML = options(products.map(p => p.series));
 
-            // 填充表格
+            // 大分類篩選按鈕
+            if (inventoryFilter && !groups.some(g => g.category === inventoryFilter)) inventoryFilter = '';
+            document.getElementById('categoryFilter').innerHTML = ['', ...groups.map(g => g.category)].map(c => `
+                <button class="${c === inventoryFilter ? 'active' : ''}" onclick="setInventoryFilter('${c}')">${c || '全部'}</button>
+            `).join('');
+
+            // 填充表格：每個大分類一個標題列，附高雄／台中小計
             const tbody = document.querySelector('#inventoryTable tbody');
-            tbody.innerHTML = '';
-            products.forEach(p => {
-                tbody.innerHTML += `
+            tbody.innerHTML = groups
+                .filter(g => !inventoryFilter || g.category === inventoryFilter)
+                .map(g => groupHeaderRow(g, 6) + g.items.map(p => `
                     <tr class="${p.active ? '' : 'inactive'}">
                         <td>${p.series}-${p.name}</td>
                         ${stockCell(p.gaoxiong)}
@@ -235,8 +253,32 @@
                         <td>NT$${p.price}</td>
                         <td>${p.active ? '上架中' : '已下架'}</td>
                     </tr>
-                `;
+                `).join('')).join('');
+        }
+
+        let inventoryFilter = '';
+
+        function setInventoryFilter(category) {
+            inventoryFilter = category;
+            loadInventory();
+        }
+
+        // 依大分類分組，維持商品原本的順序
+        function groupByCategory(list) {
+            const groups = [];
+            list.forEach(p => {
+                let g = groups.find(g => g.category === p.category);
+                if (!g) groups.push(g = { category: p.category, items: [] });
+                g.items.push(p);
             });
+            return groups;
+        }
+
+        function groupHeaderRow(g, colspan) {
+            const sum = (key) => g.items.reduce((s, p) => s + p[key], 0);
+            return `<tr class="group-row"><td colspan="${colspan}">
+                ${g.category}（${g.items.length} 項）　高雄 ${sum('gaoxiong')}　台中 ${sum('taizhong')}　合計 ${sum('gaoxiong') + sum('taizhong')}
+            </td></tr>`;
         }
 
         function selectedProduct() {
@@ -248,6 +290,7 @@
             const p = selectedProduct();
             document.getElementById('gaoxiong').value = p ? p.gaoxiong : '';
             document.getElementById('taizhong').value = p ? p.taizhong : '';
+            document.getElementById('editCategory').value = p ? p.category : '';
             document.getElementById('editSeries').value = p ? p.series : '';
             document.getElementById('editName').value = p ? p.name : '';
             document.getElementById('editPrice').value = p ? p.price : '';
@@ -281,12 +324,13 @@
 
         async function createProduct() {
             const val = (id) => document.getElementById(id).value.trim();
-            if (!val('newSeries') || !val('newName') || !val('newPrice')) {
-                alert('請填系列、品名和價格');
+            if (!val('newCategory') || !val('newSeries') || !val('newName') || !val('newPrice')) {
+                alert('請填大分類、系列、品名和價格');
                 return;
             }
             try {
                 await postJson('/api/products/create', {
+                    category: val('newCategory'),
                     series: val('newSeries'),
                     name: val('newName'),
                     price: val('newPrice'),
@@ -294,7 +338,7 @@
                     taizhong: val('newTaizhong')
                 });
                 alert(`已新增「${val('newSeries')}-${val('newName')}」，前台重新整理後就會出現`);
-                ['newSeries', 'newName', 'newPrice', 'newGaoxiong', 'newTaizhong']
+                ['newCategory', 'newSeries', 'newName', 'newPrice', 'newGaoxiong', 'newTaizhong']
                     .forEach(id => document.getElementById(id).value = '');
                 loadInventory();
             } catch (error) {
@@ -308,6 +352,7 @@
             try {
                 await postJson('/api/products/update', {
                     product_id: p.id,
+                    category: document.getElementById('editCategory').value,
                     series: document.getElementById('editSeries').value,
                     name: document.getElementById('editName').value,
                     price: document.getElementById('editPrice').value
@@ -404,10 +449,7 @@
             try {
                 const data = await api('/api/stocktake');
                 const tbody = document.querySelector('#stocktakeTable tbody');
-                tbody.innerHTML = '';
-
-                data.data.forEach(s => {
-                    tbody.innerHTML += `
+                tbody.innerHTML = groupByCategory(data.data).map(g => groupHeaderRow(g, 5) + g.items.map(s => `
                         <tr>
                             <td>${s.name}</td>
                             ${stockCell(s.gaoxiong)}
@@ -415,8 +457,7 @@
                             ${stockCell(s.total)}
                             <td>NT$${s.price}</td>
                         </tr>
-                    `;
-                });
+                    `).join('')).join('');
             } catch (error) {
                 alert('載入盤點紀錄失敗: ' + error.message);
             }
