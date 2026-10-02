@@ -81,6 +81,10 @@
         .menu-icon { font-size: 30px; }
         .punch-note { width: 100%; margin-top: 10px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; font-family: inherit; resize: vertical; }
         .punch-note-text { font-size: 12px; color: #888; margin-top: 2px; }
+        .staff-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 8px; }
+        .staff-tile { padding: 14px 8px; background: white; border: 2px solid #ddd; border-radius: 8px; font-size: 16px; font-weight: bold; color: #333; cursor: pointer; font-family: inherit; }
+        .staff-tile:hover { border-color: #667eea; }
+        .staff-tile.active { background: #667eea; border-color: #667eea; color: white; }
         .punch-pin { margin-top: 10px; font-size: 18px; letter-spacing: 4px; padding: 10px; }
         .device-status { font-size: 13px; padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; }
         .device-status.ok { background: #ebfbee; color: #2b8a3e; }
@@ -222,7 +226,8 @@
 
                 <div id="punchPanel" hidden>
                     <div id="deviceStatus" class="device-status"></div>
-                    <select id="punchStaff"></select>
+                    <div class="list-title" style="margin-top: 0;">選擇人員</div>
+                    <div id="punchStaffGrid" class="staff-grid"></div>
                     <input type="password" id="punchPin" class="punch-pin" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="🔒 打卡密碼（4～6 位數字）">
                     <textarea id="punchNote" class="punch-note" rows="2" maxlength="200" placeholder="備註（選填，例：外出送貨、補打卡、提早下班）"></textarea>
                     <div class="punch-buttons">
@@ -499,11 +504,9 @@
         }
 
         function openMenu() {
-            // 門市、人員預設跟結帳區一樣
+            // 門市預設跟結帳區一樣；打卡人員每次都要自己點選
             document.getElementById('menuStore').value = document.getElementById('store').value;
-            const punchStaff = document.getElementById('punchStaff');
-            punchStaff.innerHTML = document.getElementById('staff').innerHTML;
-            punchStaff.value = document.getElementById('staff').value;
+            selectPunchStaff('');
             document.getElementById('menuOverlay').hidden = false;
             showMenuTab('home'); // 每次打開都先顯示目錄
         }
@@ -573,8 +576,25 @@
             showMenuTab(menuTab);
         }
 
+        // 打卡人員用按鈕選（名單同結帳區的銷售人員）
+        let punchStaffName = '';
+
+        function selectPunchStaff(name) {
+            punchStaffName = name;
+            const names = [...document.getElementById('staff').options].map(o => o.value).filter(Boolean);
+            const grid = document.getElementById('punchStaffGrid');
+            grid.innerHTML = '';
+            names.forEach(n => {
+                const btn = document.createElement('button');
+                btn.className = 'staff-tile' + (n === name ? ' active' : '');
+                btn.textContent = n;
+                btn.onclick = () => selectPunchStaff(n === punchStaffName ? '' : n);
+                grid.appendChild(btn);
+            });
+        }
+
         async function punch(type) {
-            const staff = document.getElementById('punchStaff').value;
+            const staff = punchStaffName;
             const pinInput = document.getElementById('punchPin');
             const msg = document.getElementById('punchMessage');
             const fail = (text) => { msg.className = 'message error'; msg.textContent = text; };
@@ -599,7 +619,7 @@
                 msg.className = 'message success';
                 msg.textContent = `✓ ${staff} ${type === 'in' ? '上班' : '下班'}打卡成功（${timeOf(data.data.created_at)}）`;
                 document.getElementById('punchNote').value = '';
-                document.getElementById('punchStaff').value = ''; // 下一位要重新選自己
+                selectPunchStaff(''); // 下一位要重新選自己
                 loadPunches();
             } catch (error) {
                 msg.className = 'message error';
