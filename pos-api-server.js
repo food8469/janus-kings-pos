@@ -234,13 +234,13 @@ app.post('/api/inventory/update', requireAdmin, async (req, res) => {
 // 8. 新增商品
 app.post('/api/products/create', requireAdmin, async (req, res) => {
   const { category, series, name, price, gaoxiong, taizhong } = req.body || {};
-  const c = String(category || '').trim();
-  const s = String(series || '').trim();
-  const n = String(name || '').trim();
-  if (!c || !s || !n) return res.status(400).json({ status: 'error', message: '請填大分類、系列和品名' });
-  const p = toInt(price, '價格');
-  // 價格可以是 0（例如試吃品，只扣庫存不收錢）
-  if (p === null) return res.status(400).json({ status: 'error', message: '請填價格' });
+  // 只有品名必填；沒填的欄位給預設值，之後可在後台修改
+  const n = String(name || '').trim() || String(series || '').trim();
+  if (!n) return res.status(400).json({ status: 'error', message: '請至少填品名' });
+  const s = String(series || '').trim() || n;
+  const c = String(category || '').trim() || '未分類';
+  // 價格沒填當作 0（例如試吃品，只扣庫存不收錢）
+  const p = toInt(price, '價格') ?? 0;
 
   const { rows: [dup] } = await pool.query(
     'SELECT id FROM products WHERE series = $1 AND name = $2', [s, n]);

@@ -37,6 +37,14 @@
         button:disabled { opacity: 0.4; cursor: not-allowed; }
         .hint { font-size: 12px; color: #999; margin-top: 10px; }
         tr.inactive td { color: #bbb; }
+        input:disabled { background: #f5f5f5; }
+        .cell-input { width: 80px; padding: 6px; border: 1px solid #e0e0e0; background: #fafafa; font-size: 15px; }
+        .cell-input:hover { border-color: #aaa; background: white; }
+        .cell-input:focus { border-color: #667eea; background: white; outline: none; }
+        .cell-input.negative { color: #e03131; font-weight: bold; }
+        .cell-input.saved { background: #d3f9d8; transition: background 0.3s; }
+        .cell-input.error { background: #ffe3e3; }
+        tr.inactive .cell-input { color: #bbb; }
         tr.group-row td { background: #eef1ff; color: #4c5bd4; font-weight: bold; }
         tr.group-row:hover td { background: #eef1ff; }
         .filter-bar { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 20px; }
@@ -93,42 +101,22 @@
         <div id="inventory" class="content">
             <h2>庫存管理</h2>
             <div class="section">
-                <h3>📦 修改庫存 / 商品資料</h3>
-                <div class="input-group">
-                    <select id="productSelect" onchange="loadProductDetails()">
-                        <option value="">-- 選擇商品 --</option>
-                    </select>
-                    <input type="number" id="gaoxiong" placeholder="高雄庫存" min="0">
-                    <input type="number" id="taizhong" placeholder="台中庫存" min="0">
-                </div>
-                <button onclick="updateInventory()">💾 保存庫存</button>
-                <div class="input-group">
-                    <input type="text" id="editCategory" placeholder="大分類" list="categoryList">
-                    <input type="text" id="editSeries" placeholder="系列" list="seriesList">
-                    <input type="text" id="editName" placeholder="品名">
-                    <input type="number" id="editPrice" placeholder="價格" min="0">
-                </div>
-                <button onclick="updateProduct()">✏️ 保存商品資料</button>
-                <button id="toggleActiveBtn" class="secondary" onclick="toggleActive()" disabled>下架</button>
-                <button id="deleteBtn" class="danger" onclick="deleteProduct()" disabled>🗑️ 刪除</button>
-            </div>
-
-            <div class="section">
                 <h3>➕ 新增商品</h3>
                 <div class="input-group">
-                    <input type="text" id="newCategory" placeholder="大分類（例：一口吃、試吃、整片兩數）" list="categoryList">
-                    <input type="text" id="newSeries" placeholder="系列（例：經典一口吃）" list="seriesList">
-                    <input type="text" id="newName" placeholder="品名（例：梅子）">
-                    <input type="number" id="newPrice" placeholder="價格" min="0">
-                    <input type="number" id="newGaoxiong" placeholder="高雄庫存（可空白）" min="0">
-                    <input type="number" id="newTaizhong" placeholder="台中庫存（可空白）" min="0">
+                    <input type="text" id="newCategory" placeholder="大分類（例：試吃）" list="categoryList">
+                    <input type="text" id="newSeries" placeholder="系列（例：試吃包）" list="seriesList">
+                    <input type="text" id="newName" placeholder="品名（例：鹽味）">
+                    <input type="number" id="newPrice" placeholder="價格">
+                    <input type="number" id="newGaoxiong" placeholder="高雄庫存">
+                    <input type="number" id="newTaizhong" placeholder="台中庫存">
                 </div>
                 <button onclick="createProduct()">➕ 新增商品</button>
-                <p class="hint">大分類、系列都可以選現有的，也可以打新的名字，前台會自動多出來。試吃品價格可以填 0。</p>
+                <p class="hint">只填品名就能新增，其他沒填的可以之後在下面表格或「修改商品」補上。沒填大分類會歸到「未分類」，價格沒填當作 0。</p>
             </div>
             <datalist id="categoryList"></datalist>
             <datalist id="seriesList"></datalist>
 
+            <p class="hint">💡 高雄、台中、單價可以直接點數字修改，按 Enter 或點旁邊就會自動儲存。</p>
             <div id="categoryFilter" class="filter-bar"></div>
             <table id="inventoryTable">
                 <thead>
@@ -136,6 +124,24 @@
                 </thead>
                 <tbody></tbody>
             </table>
+
+            <div class="section">
+                <h3>✏️ 修改商品 / 下架 / 刪除</h3>
+                <div class="input-group">
+                    <select id="productSelect" onchange="loadProductDetails()">
+                        <option value="">-- 先選擇要修改的商品 --</option>
+                    </select>
+                </div>
+                <div class="input-group">
+                    <input type="text" id="editCategory" placeholder="大分類" list="categoryList" disabled>
+                    <input type="text" id="editSeries" placeholder="系列" list="seriesList" disabled>
+                    <input type="text" id="editName" placeholder="品名" disabled>
+                    <input type="number" id="editPrice" placeholder="價格" disabled>
+                </div>
+                <button id="saveProductBtn" onclick="updateProduct()" disabled>✏️ 保存商品資料</button>
+                <button id="toggleActiveBtn" class="secondary" onclick="toggleActive()" disabled>下架</button>
+                <button id="deleteBtn" class="danger" onclick="deleteProduct()" disabled>🗑️ 刪除</button>
+            </div>
         </div>
 
         <!-- 交易紀錄 -->
@@ -222,7 +228,7 @@
             // 填充下拉選單（依大分類分組，保留目前選擇）
             const select = document.getElementById('productSelect');
             const selected = select.value;
-            select.innerHTML = '<option value="">-- 選擇商品 --</option>' + groups.map(g => `
+            select.innerHTML = '<option value="">-- 先選擇要修改的商品 --</option>' + groups.map(g => `
                 <optgroup label="${g.category}">
                     ${g.items.map(p => `<option value="${p.id}">${p.series}-${p.name}${p.active ? '' : '（已下架）'}</option>`).join('')}
                 </optgroup>`).join('');
@@ -240,20 +246,64 @@
                 <button class="${c === inventoryFilter ? 'active' : ''}" onclick="setInventoryFilter('${c}')">${c || '全部'}</button>
             `).join('');
 
-            // 填充表格：每個大分類一個標題列，附高雄／台中小計
+            // 填充表格：每個大分類一個標題列，附高雄／台中小計；數字可以直接點來改
+            const cell = (p, field) => `<td><input type="number" class="cell-input ${p[field] < 0 ? 'negative' : ''}"
+                value="${p[field]}" data-id="${p.id}" data-field="${field}"
+                onchange="saveCell(this)" onkeydown="if (event.key === 'Enter') this.blur()"></td>`;
             const tbody = document.querySelector('#inventoryTable tbody');
             tbody.innerHTML = groups
                 .filter(g => !inventoryFilter || g.category === inventoryFilter)
                 .map(g => groupHeaderRow(g, 6) + g.items.map(p => `
                     <tr class="${p.active ? '' : 'inactive'}">
                         <td>${p.series}-${p.name}</td>
-                        ${stockCell(p.gaoxiong)}
-                        ${stockCell(p.taizhong)}
+                        ${cell(p, 'gaoxiong')}
+                        ${cell(p, 'taizhong')}
                         ${stockCell(p.gaoxiong + p.taizhong)}
-                        <td>NT$${p.price}</td>
+                        ${cell(p, 'price')}
                         <td>${p.active ? '上架中' : '已下架'}</td>
                     </tr>
                 `).join('')).join('');
+        }
+
+        // 表格內直接修改高雄／台中庫存或單價
+        async function saveCell(input) {
+            const p = products.find(p => p.id === parseInt(input.dataset.id));
+            const field = input.dataset.field;
+            const value = Number(input.value);
+            input.classList.remove('saved', 'error');
+            if (input.value.trim() === '' || !Number.isInteger(value) || (field === 'price' && value < 0)) {
+                alert('請輸入整數' + (field === 'price' ? '（0 以上）' : ''));
+                input.value = p[field];
+                return;
+            }
+            try {
+                if (field === 'price') {
+                    await postJson('/api/products/update', { product_id: p.id, price: value });
+                } else {
+                    await postJson('/api/inventory/update', { product_id: p.id, [field]: value });
+                }
+                p[field] = value;
+                input.classList.toggle('negative', value < 0);
+                input.classList.add('saved');
+                setTimeout(() => input.classList.remove('saved'), 1000);
+
+                // 更新這一列的合計和分類小計
+                const totalCell = input.closest('tr').children[3];
+                totalCell.outerHTML = stockCell(p.gaoxiong + p.taizhong);
+                refreshGroupHeaders();
+                if (selectedProduct() === p) loadProductDetails();
+            } catch (error) {
+                input.classList.add('error');
+                alert('儲存失敗: ' + error.message);
+                input.value = p[field];
+            }
+        }
+
+        function refreshGroupHeaders() {
+            groupByCategory(products).forEach(g => {
+                const row = document.querySelector(`#inventoryTable tr.group-row[data-category="${CSS.escape(g.category)}"]`);
+                if (row) row.outerHTML = groupHeaderRow(g, 6);
+            });
         }
 
         let inventoryFilter = '';
@@ -276,7 +326,7 @@
 
         function groupHeaderRow(g, colspan) {
             const sum = (key) => g.items.reduce((s, p) => s + p[key], 0);
-            return `<tr class="group-row"><td colspan="${colspan}">
+            return `<tr class="group-row" data-category="${g.category}"><td colspan="${colspan}">
                 ${g.category}（${g.items.length} 項）　高雄 ${sum('gaoxiong')}　台中 ${sum('taizhong')}　合計 ${sum('gaoxiong') + sum('taizhong')}
             </td></tr>`;
         }
@@ -288,12 +338,13 @@
         function loadProductDetails() {
             // 根據選擇的商品填入目前數量與資料
             const p = selectedProduct();
-            document.getElementById('gaoxiong').value = p ? p.gaoxiong : '';
-            document.getElementById('taizhong').value = p ? p.taizhong : '';
             document.getElementById('editCategory').value = p ? p.category : '';
             document.getElementById('editSeries').value = p ? p.series : '';
             document.getElementById('editName').value = p ? p.name : '';
             document.getElementById('editPrice').value = p ? p.price : '';
+            // 沒選商品時不能輸入，避免和「新增商品」搞混
+            ['editCategory', 'editSeries', 'editName', 'editPrice', 'saveProductBtn']
+                .forEach(id => document.getElementById(id).disabled = !p);
             const btn = document.getElementById('toggleActiveBtn');
             btn.disabled = !p;
             btn.textContent = p && !p.active ? '重新上架' : '下架';
@@ -324,12 +375,12 @@
 
         async function createProduct() {
             const val = (id) => document.getElementById(id).value.trim();
-            if (!val('newCategory') || !val('newSeries') || !val('newName') || !val('newPrice')) {
-                alert('請填大分類、系列、品名和價格');
+            if (!val('newName') && !val('newSeries')) {
+                alert('請至少填品名');
                 return;
             }
             try {
-                await postJson('/api/products/create', {
+                const { data: p } = await postJson('/api/products/create', {
                     category: val('newCategory'),
                     series: val('newSeries'),
                     name: val('newName'),
@@ -337,7 +388,7 @@
                     gaoxiong: val('newGaoxiong'),
                     taizhong: val('newTaizhong')
                 });
-                alert(`已新增「${val('newSeries')}-${val('newName')}」，前台重新整理後就會出現`);
+                alert(`已新增「${p.category} / ${p.series}-${p.name}」，前台重新整理後就會出現`);
                 ['newCategory', 'newSeries', 'newName', 'newPrice', 'newGaoxiong', 'newTaizhong']
                     .forEach(id => document.getElementById(id).value = '');
                 loadInventory();
@@ -376,28 +427,6 @@
             }
         }
 
-        async function updateInventory() {
-            const productId = document.getElementById('productSelect').value;
-            const gaoxiong = parseInt(document.getElementById('gaoxiong').value);
-            const taizhong = parseInt(document.getElementById('taizhong').value);
-
-            if (!productId || isNaN(gaoxiong) || isNaN(taizhong)) {
-                alert('請填入正確的資訊');
-                return;
-            }
-
-            try {
-                await api('/api/inventory/update', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ product_id: parseInt(productId), gaoxiong, taizhong })
-                });
-                alert('庫存已更新！');
-                loadInventory();
-            } catch (error) {
-                alert('更新失敗: ' + error.message);
-            }
-        }
 
         async function loadSalesRecords() {
             try {
