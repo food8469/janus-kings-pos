@@ -40,6 +40,12 @@
         button.row-edit { padding: 4px 10px; background: white; color: #667eea; border: 1px solid #667eea; font-size: 13px; }
         button.row-edit:hover { background: #eef1ff; }
         tr.editing-row td { background: #fff9db; }
+        .check-col { width: 36px; }
+        .check-col input, td input[type=checkbox] { width: 18px; height: 18px; cursor: pointer; }
+        tr.checked-row td { background: #e7f5ff; }
+        .batch-bar { position: sticky; top: 0; z-index: 10; background: #e7f5ff; border: 2px solid #4dabf7; border-radius: 8px; padding: 12px 15px; margin-top: 15px; }
+        .batch-bar button { margin: 0 6px 6px 0; }
+        .batch-title { font-weight: bold; color: #1971c2; }
         tr.inactive td { color: #bbb; }
         input:disabled { background: #f5f5f5; }
         .cell-input { width: 80px; padding: 6px; border: 1px solid #e0e0e0; background: #fafafa; font-size: 15px; }
@@ -131,9 +137,32 @@
 
             <p class="hint">💡 高雄、台中、單價可以直接點數字修改，按 Enter 或點旁邊就會自動儲存。</p>
             <div id="categoryFilter" class="filter-bar"></div>
+
+            <div id="batchBar" class="batch-bar" hidden>
+                <div class="batch-title">☑️ 已選 <b id="checkedCount">0</b> 項商品，要一起改成：</div>
+                <div class="input-group">
+                    <select id="batchStockMode">
+                        <option value="set">庫存：直接設為</option>
+                        <option value="add">庫存：增加（進貨）</option>
+                        <option value="sub">庫存：減少</option>
+                    </select>
+                    <input type="number" id="batchGaoxiong" placeholder="高雄庫存">
+                    <input type="number" id="batchTaizhong" placeholder="台中庫存">
+                    <input type="number" id="batchPrice" placeholder="價格">
+                    <input type="text" id="batchCategory" placeholder="大分類" list="categoryList">
+                    <input type="text" id="batchSeries" placeholder="系列" list="seriesList">
+                </div>
+                <button onclick="applyBatch()">✅ 套用到勾選的商品</button>
+                <button class="secondary" onclick="batchSetActive(true)">上架</button>
+                <button class="secondary" onclick="batchSetActive(false)">下架</button>
+                <button class="danger" onclick="batchDelete()">🗑️ 刪除</button>
+                <button class="secondary" onclick="clearChecks()">取消勾選</button>
+                <p class="hint">空白的欄位不會改。例：只填「高雄庫存 20」→ 勾選的商品高雄庫存都變 20。</p>
+            </div>
+
             <table id="inventoryTable">
                 <thead>
-                    <tr><th>商品</th><th>高雄</th><th>台中</th><th>合計</th><th>單價</th><th>狀態</th><th></th></tr>
+                    <tr><th class="check-col"><input type="checkbox" id="checkAll" title="全選" onchange="toggleChecks(visibleIds(), this.checked)"></th><th>商品</th><th>高雄</th><th>台中</th><th>合計</th><th>單價</th><th>狀態</th><th></th></tr>
                 </thead>
                 <tbody></tbody>
             </table>
@@ -238,8 +267,9 @@
             const tbody = document.querySelector('#inventoryTable tbody');
             tbody.innerHTML = groups
                 .filter(g => !inventoryFilter || g.category === inventoryFilter)
-                .map(g => groupHeaderRow(g, 7) + g.items.map(p => `
+                .map(g => inventoryGroupRow(g) + g.items.map(p => `
                     <tr class="${p.active ? '' : 'inactive'}" data-id="${p.id}">
+                        <td><input type="checkbox" class="row-check" data-id="${p.id}" onchange="toggleChecks([${p.id}], this.checked)"></td>
                         <td>${p.series}-${p.name}</td>
                         ${cell(p, 'gaoxiong')}
                         ${cell(p, 'taizhong')}
@@ -253,6 +283,133 @@
             // 正在修改的商品被刪掉了就回到新增模式；否則保持修改狀態
             if (document.getElementById('productSelect').value && !selectedProduct()) cancelEdit();
             else setFormMode(selectedProduct());
+
+            // 勾選狀態保留（已刪除的商品移除）
+            checkedIds = new Set([...checkedIds].filter(id => products.some(p => p.id === id)));
+            syncChecks();
+        }
+
+        // ============ 勾選 & 批次修改 ============
+        let checkedIds = new Set();
+
+        function visibleIds() {
+            return [...document.querySelectorAll('#inventoryTable .row-check')].map(c => parseInt(c.dataset.id));
+        }
+
+        function toggleChecks(ids, on) {
+            ids.forEach(id => on ? checkedIds.add(id) : checkedIds.delete(id));
+            syncChecks();
+        }
+
+        function clearChecks() {
+            checkedIds.clear();
+            syncChecks();
+        }
+
+        // 讓畫面上的勾選框、全選、分類勾選、批次列跟 checkedIds 一致
+        function syncChecks() {
+            document.querySelectorAll('#inventoryTable .row-check').forEach(c => {
+                const on = checkedIds.has(parseInt(c.dataset.id));
+                c.checked = on;
+                c.closest('tr').classList.toggle('checked-row', on);
+            });
+            const setBox = (box, ids) => {
+                const n = ids.filter(id => checkedIds.has(id)).length;
+                box.checked = ids.length > 0 && n === ids.length;
+                box.indeterminate = n > 0 && n < ids.length;
+            };
+            document.querySelectorAll('#inventoryTable .group-check').forEach(box =>
+                setBox(box, products.filter(p => p.category === box.dataset.category).map(p => p.id)));
+            setBox(document.getElementById('checkAll'), visibleIds());
+            document.getElementById('checkedCount').textContent = checkedIds.size;
+            document.getElementById('batchBar').hidden = checkedIds.size === 0;
+        }
+
+        function checkedProducts() {
+            return products.filter(p => checkedIds.has(p.id));
+        }
+
+        async function applyBatch() {
+            const val = (id) => document.getElementById(id).value.trim();
+            const num = (id) => val(id) === '' ? null : Number(val(id));
+            const mode = val('batchStockMode');
+            const gx = num('batchGaoxiong'), tz = num('batchTaizhong'), price = num('batchPrice');
+            const category = val('batchCategory'), series = val('batchSeries');
+
+            if ([gx, tz, price].some(n => n !== null && (!Number.isInteger(n) || n < 0))) {
+                alert('庫存和價格請填 0 以上的整數');
+                return;
+            }
+            if (gx === null && tz === null && price === null && !category && !series) {
+                alert('請至少填一個要修改的欄位');
+                return;
+            }
+
+            const list = checkedProducts();
+            const modeText = { set: '設為', add: '增加', sub: '減少' }[mode];
+            const changes = [
+                gx !== null && `高雄庫存${modeText} ${gx}`,
+                tz !== null && `台中庫存${modeText} ${tz}`,
+                price !== null && `價格改為 ${price}`,
+                category && `大分類改為「${category}」`,
+                series && `系列改為「${series}」`,
+            ].filter(Boolean);
+            if (!confirm(`確定要修改勾選的 ${list.length} 項商品？\n\n` + changes.join('\n'))) return;
+
+            const newStock = (old, n) => n === null ? undefined : mode === 'add' ? old + n : mode === 'sub' ? old - n : n;
+            let failed = 0;
+            for (const p of list) {
+                try {
+                    if (gx !== null || tz !== null) {
+                        await postJson('/api/inventory/update', {
+                            product_id: p.id, gaoxiong: newStock(p.gaoxiong, gx), taizhong: newStock(p.taizhong, tz)
+                        });
+                    }
+                    if (price !== null || category || series) {
+                        await postJson('/api/products/update', {
+                            product_id: p.id, price: price ?? undefined, category: category || undefined, series: series || undefined
+                        });
+                    }
+                } catch (error) {
+                    failed++;
+                }
+            }
+            alert(failed ? `完成，但有 ${failed} 項失敗，請重新整理後檢查` : `已修改 ${list.length} 項商品！`);
+            ['batchGaoxiong', 'batchTaizhong', 'batchPrice', 'batchCategory', 'batchSeries']
+                .forEach(id => document.getElementById(id).value = '');
+            loadInventory();
+        }
+
+        async function batchSetActive(active) {
+            const list = checkedProducts();
+            if (!confirm(`確定要把勾選的 ${list.length} 項商品${active ? '上架' : '下架'}？`)) return;
+            let failed = 0;
+            for (const p of list) {
+                try { await postJson('/api/products/update', { product_id: p.id, active }); } catch (error) { failed++; }
+            }
+            alert(failed ? `完成，但有 ${failed} 項失敗` : `已${active ? '上架' : '下架'} ${list.length} 項商品`);
+            loadInventory();
+        }
+
+        async function batchDelete() {
+            const list = checkedProducts();
+            const names = list.map(p => `${p.series}-${p.name}`);
+            const preview = names.slice(0, 10).join('\n') + (names.length > 10 ? `\n…等 ${names.length} 項` : '');
+            if (!confirm(`確定要刪除這 ${list.length} 項商品？刪除後無法復原（過去的銷售紀錄會保留）。\n\n${preview}`)) return;
+            let failed = 0;
+            for (const p of list) {
+                try { await postJson('/api/products/delete', { product_id: p.id }); } catch (error) { failed++; }
+            }
+            alert(failed ? `完成，但有 ${failed} 項失敗` : `已刪除 ${list.length} 項商品`);
+            loadInventory();
+        }
+
+        // 庫存表的大分類標題列（多一個勾選框，可勾整個分類）
+        function inventoryGroupRow(g) {
+            return groupHeaderRow(g, 7).replace('<td colspan="7">',
+                `<td><input type="checkbox" class="group-check" data-category="${g.category}"
+                    onchange="toggleChecks(products.filter(p => p.category === this.dataset.category).map(p => p.id), this.checked)"></td>
+                 <td colspan="7">`);
         }
 
         // 表格內直接修改高雄／台中庫存或單價
@@ -278,7 +435,7 @@
                 setTimeout(() => input.classList.remove('saved'), 1000);
 
                 // 更新這一列的合計和分類小計
-                const totalCell = input.closest('tr').children[3];
+                const totalCell = input.closest('tr').children[4];
                 totalCell.outerHTML = stockCell(p.gaoxiong + p.taizhong);
                 refreshGroupHeaders();
                 // 上面表單正在修改這個商品的話，同步數字
@@ -296,15 +453,20 @@
         function refreshGroupHeaders() {
             groupByCategory(products).forEach(g => {
                 const row = document.querySelector(`#inventoryTable tr.group-row[data-category="${CSS.escape(g.category)}"]`);
-                if (row) row.outerHTML = groupHeaderRow(g, 7);
+                if (row) row.outerHTML = inventoryGroupRow(g);
             });
+            syncChecks();
         }
 
         let inventoryFilter = '';
 
-        function setInventoryFilter(category) {
+        async function setInventoryFilter(category) {
             inventoryFilter = category;
-            loadInventory();
+            await loadInventory();
+            // 只保留畫面上看得到的勾選，避免批次改到看不到的商品
+            const visible = visibleIds();
+            checkedIds = new Set([...checkedIds].filter(id => visible.includes(id)));
+            syncChecks();
         }
 
         // 依大分類分組，維持商品原本的順序
