@@ -80,6 +80,48 @@
             <button class="tab-btn" onclick="showTab('staff')">👥 員工統計</button>
             <button class="tab-btn" onclick="showTab('stocktake')">📋 盤點紀錄</button>
             <button class="tab-btn" onclick="showTab('attendance')">🕐 打卡紀錄</button>
+            <button class="tab-btn" onclick="showTab('punchSettings')">🔐 打卡設定</button>
+        </div>
+
+        <!-- 打卡設定 -->
+        <div id="punchSettings" class="content">
+            <h2>打卡設定</h2>
+
+            <div class="section">
+                <h3>📍 這台裝置</h3>
+                <p id="thisDeviceStatus" class="hint" style="font-size: 14px;">檢查中…</p>
+                <div id="registerDevice" class="input-group">
+                    <input type="text" id="deviceName" placeholder="裝置名稱（例：高雄櫃台平板）">
+                    <select id="deviceStore">
+                        <option value="高雄">高雄門市</option>
+                        <option value="台中">台中門市</option>
+                    </select>
+                    <button onclick="registerThisDevice()">📍 設為門市打卡裝置</button>
+                </div>
+                <p class="hint">請在<b>店裡要用來打卡的平板或電腦</b>上登入後台，再按這個按鈕。只有設定過的裝置能打卡，網址被複製到別的手機或電腦也打不了。</p>
+            </div>
+
+            <div class="section">
+                <h3>🖥️ 已設定的打卡裝置</h3>
+                <table id="deviceTable">
+                    <thead><tr><th>裝置名稱</th><th>門市</th><th>設定時間</th><th></th></tr></thead>
+                    <tbody></tbody>
+                </table>
+                <p class="hint">裝置遺失或不用了，按「停用」就不能再打卡。</p>
+            </div>
+
+            <div class="section">
+                <h3>👥 員工與打卡密碼</h3>
+                <table id="staffTable2">
+                    <thead><tr><th>員工</th><th>打卡密碼</th><th>設定新密碼</th><th></th></tr></thead>
+                    <tbody></tbody>
+                </table>
+                <div class="input-group">
+                    <input type="text" id="newStaffName" placeholder="新員工名字">
+                    <button onclick="addStaff()">➕ 新增員工</button>
+                </div>
+                <p class="hint">密碼是 4～6 位數字，只有員工本人知道，打卡時要輸入。前台結帳的「銷售人員」也會使用這份名單。</p>
+            </div>
         </div>
 
         <!-- 打卡紀錄 -->
@@ -93,7 +135,7 @@
             <div id="attendanceSummary" class="stat-box"></div>
             <table id="attendanceTable">
                 <thead>
-                    <tr><th>日期</th><th>人員</th><th>門市</th><th>上班</th><th>下班</th><th>工時</th><th>備註</th></tr>
+                    <tr><th>日期</th><th>人員</th><th>門市 / 裝置</th><th>上班</th><th>下班</th><th>工時</th><th>備註</th></tr>
                 </thead>
                 <tbody></tbody>
             </table>
@@ -235,6 +277,116 @@
             else if (tabName === 'staff') loadStaffStats();
             else if (tabName === 'stocktake') loadStocktake();
             else if (tabName === 'attendance') loadAttendance();
+            else if (tabName === 'punchSettings') loadPunchSettings();
+        }
+
+        // ============ 打卡設定：門市裝置 + 員工密碼 ============
+        const DEVICE_KEY = 'pos_punch_device';
+        const getDeviceToken = () => { try { return localStorage.getItem(DEVICE_KEY); } catch (e) { return null; } };
+        const escHtml = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+        async function loadPunchSettings() {
+            // 這台裝置的狀態
+            const status = document.getElementById('thisDeviceStatus');
+            const token = getDeviceToken();
+            let thisDevice = null;
+            if (token) {
+                try { thisDevice = (await api(`/api/punch-device?token=${encodeURIComponent(token)}`)).data; } catch (e) { /* 已停用或無效 */ }
+            }
+            status.innerHTML = thisDevice
+                ? `✅ 這台已設定為 <b>${escHtml(thisDevice.store)}門市</b> 打卡裝置（${escHtml(thisDevice.name)}）`
+                : '⚠️ 這台<b>還不是</b>門市打卡裝置，不能打卡。';
+            status.style.color = thisDevice ? '#2b8a3e' : '#e67700';
+            document.getElementById('registerDevice').hidden = !!thisDevice;
+
+            try {
+                const devices = (await api('/api/admin/devices')).data;
+                document.querySelector('#deviceTable tbody').innerHTML = devices.length ? devices.map(d => `
+                    <tr>
+                        <td>${escHtml(d.name)}${thisDevice && thisDevice.name === d.name && thisDevice.store === d.store ? ' <b style="color:#2b8a3e">（這台）</b>' : ''}</td>
+                        <td>${escHtml(d.store)}</td>
+                        <td>${new Date(d.created_at).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false })}</td>
+                        <td><button class="danger" onclick="revokeDevice(${d.id}, '${escHtml(d.name)}')">停用</button></td>
+                    </tr>`).join('') : '<tr><td colspan="4" style="color:#999">還沒有設定任何打卡裝置</td></tr>';
+
+                const staff = (await api('/api/admin/staff')).data;
+                document.querySelector('#staffTable2 tbody').innerHTML = staff.map(s => `
+                    <tr>
+                        <td>${escHtml(s.name)}</td>
+                        <td>${s.has_pin ? '<span style="color:#2b8a3e">✅ 已設定</span>' : '<span style="color:#e03131">❌ 未設定（不能打卡）</span>'}</td>
+                        <td>
+                            <input type="password" inputmode="numeric" maxlength="6" placeholder="4～6 位數字" style="width: 120px;" data-staff="${escHtml(s.name)}">
+                            <button onclick="setPin(this)">設定</button>
+                        </td>
+                        <td><button class="danger" onclick="deleteStaff('${escHtml(s.name)}')">刪除</button></td>
+                    </tr>`).join('');
+            } catch (error) {
+                alert('載入打卡設定失敗: ' + error.message);
+            }
+        }
+
+        async function registerThisDevice() {
+            const name = document.getElementById('deviceName').value.trim();
+            const store = document.getElementById('deviceStore').value;
+            if (!name) { alert('請填裝置名稱，例如：高雄櫃台平板'); return; }
+            if (!confirm(`確定要把「這台裝置」設為 ${store}門市 的打卡裝置？\n\n請確認你現在是在店裡要用來打卡的裝置上操作。`)) return;
+            try {
+                const device = (await postJson('/api/admin/devices', { name, store })).data;
+                try { localStorage.setItem(DEVICE_KEY, device.token); } catch (e) {
+                    alert('這個瀏覽器無法儲存設定（可能是無痕模式），請用一般模式開啟');
+                    return;
+                }
+                alert(`完成！這台已設定為 ${store}門市 打卡裝置。`);
+                document.getElementById('deviceName').value = '';
+                loadPunchSettings();
+            } catch (error) {
+                alert('設定失敗: ' + error.message);
+            }
+        }
+
+        async function revokeDevice(id, name) {
+            if (!confirm(`確定要停用「${name}」？停用後這台就不能打卡了。`)) return;
+            try {
+                await postJson('/api/admin/devices/revoke', { id });
+                loadPunchSettings();
+            } catch (error) {
+                alert('停用失敗: ' + error.message);
+            }
+        }
+
+        async function setPin(btn) {
+            const input = btn.previousElementSibling;
+            const pin = input.value.trim();
+            if (!/^\d{4,6}$/.test(pin)) { alert('密碼請填 4～6 位數字'); return; }
+            try {
+                await postJson('/api/admin/staff/pin', { name: input.dataset.staff, pin });
+                alert(`${input.dataset.staff} 的打卡密碼已設定`);
+                loadPunchSettings();
+            } catch (error) {
+                alert('設定失敗: ' + error.message);
+            }
+        }
+
+        async function addStaff() {
+            const name = document.getElementById('newStaffName').value.trim();
+            if (!name) { alert('請填員工名字'); return; }
+            try {
+                await postJson('/api/admin/staff', { name });
+                document.getElementById('newStaffName').value = '';
+                loadPunchSettings();
+            } catch (error) {
+                alert('新增失敗: ' + error.message);
+            }
+        }
+
+        async function deleteStaff(name) {
+            if (!confirm(`確定要刪除員工「${name}」？\n（過去的打卡和銷售紀錄會保留）`)) return;
+            try {
+                await postJson('/api/admin/staff/delete', { name });
+                loadPunchSettings();
+            } catch (error) {
+                alert('刪除失敗: ' + error.message);
+            }
         }
 
         // ============ 打卡紀錄 ============
@@ -252,7 +404,7 @@
                     const date = new Date(r.created_at).toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
                     const key = `${date}|${r.staff}`;
                     const d = map[key] || (map[key] = { date, staff: r.staff, stores: new Set(), in: null, out: null, notes: [] });
-                    d.stores.add(r.store);
+                    d.stores.add(r.device_name ? `${r.store}（${r.device_name}）` : r.store);
                     const t = new Date(r.created_at);
                     if (r.note) {
                         const hm = t.toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false });

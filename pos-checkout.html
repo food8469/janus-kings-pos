@@ -81,6 +81,10 @@
         .menu-icon { font-size: 30px; }
         .punch-note { width: 100%; margin-top: 10px; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px; font-family: inherit; resize: vertical; }
         .punch-note-text { font-size: 12px; color: #888; margin-top: 2px; }
+        .punch-pin { margin-top: 10px; font-size: 18px; letter-spacing: 4px; padding: 10px; }
+        .device-status { font-size: 13px; padding: 10px 12px; border-radius: 6px; margin-bottom: 12px; }
+        .device-status.ok { background: #ebfbee; color: #2b8a3e; }
+        .device-status.bad { background: #fff4e6; color: #d9480f; }
         .menu-body { flex: 1; overflow-y: auto; padding: 18px 20px; }
         .menu-store { display: flex; align-items: center; gap: 10px; margin-bottom: 15px; font-size: 14px; }
         .menu-store select { width: auto; flex: 1; }
@@ -217,7 +221,9 @@
                 </div>
 
                 <div id="punchPanel" hidden>
+                    <div id="deviceStatus" class="device-status"></div>
                     <select id="punchStaff"></select>
+                    <input type="password" id="punchPin" class="punch-pin" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="🔒 打卡密碼（4～6 位數字）">
                     <textarea id="punchNote" class="punch-note" rows="2" maxlength="200" placeholder="備註（選填，例：外出送貨、補打卡、提早下班）"></textarea>
                     <div class="punch-buttons">
                         <button class="punch-btn in" onclick="punch('in')">🟢 上班打卡</button>
@@ -517,8 +523,49 @@
             document.getElementById('ordersPanel').hidden = tab !== 'orders';
             document.getElementById('punchMessage').className = '';
             document.getElementById('punchMessage').textContent = '';
-            if (tab === 'punch') loadPunches();
+            document.getElementById('menuStore').disabled = false;
+            if (tab === 'punch') checkDevice().then(loadPunches);
             else if (tab === 'orders') loadOrders();
+        }
+
+        // ---- 門市打卡裝置（在後台「打卡設定」登記過的裝置才能打卡）----
+        const DEVICE_KEY = 'pos_punch_device';
+        const getDeviceToken = () => { try { return localStorage.getItem(DEVICE_KEY); } catch (e) { return null; } };
+        let punchDevice = null;
+
+        async function checkDevice() {
+            const box = document.getElementById('deviceStatus');
+            const token = getDeviceToken();
+            punchDevice = null;
+            if (token) {
+                try { punchDevice = await getJson(`/api/punch-device?token=${encodeURIComponent(token)}`); } catch (e) { /* 未登記或已停用 */ }
+            }
+            box.className = 'device-status ' + (punchDevice ? 'ok' : 'bad');
+            box.innerHTML = punchDevice
+                ? `📍 ${esc(punchDevice.store)}門市打卡裝置（${esc(punchDevice.name)}）`
+                : '⚠️ 這台裝置不能打卡。請店長在這台裝置登入後台 →「🔐 打卡設定」設為門市打卡裝置。';
+            document.querySelectorAll('.punch-btn').forEach(b => b.disabled = !punchDevice);
+
+            // 打卡門市固定為裝置所屬門市
+            const storeSelect = document.getElementById('menuStore');
+            if (punchDevice && menuTab === 'punch') {
+                storeSelect.value = punchDevice.store;
+                document.getElementById('store').value = punchDevice.store;
+            }
+            storeSelect.disabled = !!punchDevice && menuTab === 'punch';
+        }
+
+        // 員工名單從後台讀取（後台「打卡設定」管理）
+        async function loadStaff() {
+            try {
+                const names = await getJson('/api/staff');
+                const options = '<option value="">-- 選擇人員 --</option>' +
+                    names.map(n => `<option value="${esc(n)}">${esc(n)}</option>`).join('');
+                const select = document.getElementById('staff');
+                const current = select.value;
+                select.innerHTML = options;
+                select.value = current;
+            } catch (e) { /* 讀不到就保留原本的名單 */ }
         }
 
         function changeMenuStore(store) {
@@ -528,31 +575,38 @@
 
         async function punch(type) {
             const staff = document.getElementById('punchStaff').value;
-            const store = document.getElementById('menuStore').value;
+            const pinInput = document.getElementById('punchPin');
             const msg = document.getElementById('punchMessage');
-            if (!staff) {
-                msg.className = 'message error';
-                msg.textContent = '請先選擇人員';
-                return;
-            }
+            const fail = (text) => { msg.className = 'message error'; msg.textContent = text; };
+            if (!punchDevice) return fail('這台裝置不能打卡');
+            if (!staff) return fail('請先選擇人員');
+            if (!/^\d{4,6}$/.test(pinInput.value)) return fail('請輸入 4～6 位數字的打卡密碼');
+
             document.querySelectorAll('.punch-btn').forEach(b => b.disabled = true);
             try {
                 const res = await fetch(`${API_URL()}/api/attendance/punch`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ staff, store, type, note: document.getElementById('punchNote').value.trim() })
+                    body: JSON.stringify({
+                        staff, type,
+                        pin: pinInput.value,
+                        device_token: getDeviceToken(),
+                        note: document.getElementById('punchNote').value.trim()
+                    })
                 });
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.message);
                 msg.className = 'message success';
                 msg.textContent = `✓ ${staff} ${type === 'in' ? '上班' : '下班'}打卡成功（${timeOf(data.data.created_at)}）`;
                 document.getElementById('punchNote').value = '';
+                document.getElementById('punchStaff').value = ''; // 下一位要重新選自己
                 loadPunches();
             } catch (error) {
                 msg.className = 'message error';
                 msg.textContent = '打卡失敗：' + error.message;
             } finally {
-                document.querySelectorAll('.punch-btn').forEach(b => b.disabled = false);
+                pinInput.value = ''; // 密碼不留在畫面上
+                document.querySelectorAll('.punch-btn').forEach(b => b.disabled = !punchDevice);
             }
         }
 
@@ -606,8 +660,9 @@
             }
         }
 
-        // 初始化：載入商品
+        // 初始化：載入商品、員工名單
         loadProducts();
+        loadStaff();
         renderCart();
     </script>
 </body>

@@ -4,6 +4,7 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const crypto = require('crypto');
 const { Pool } = require('pg');
 require('dotenv').config();
 
@@ -83,7 +84,30 @@ async function initDb() {
     );
     CREATE INDEX IF NOT EXISTS attendance_created_at_idx ON attendance (created_at);
     ALTER TABLE attendance ADD COLUMN IF NOT EXISTS note TEXT;
+    ALTER TABLE attendance ADD COLUMN IF NOT EXISTS device_name TEXT;
+    -- 員工（打卡密碼存雜湊值，不存原始密碼）
+    CREATE TABLE IF NOT EXISTS staff (
+      name       TEXT PRIMARY KEY,
+      pin_hash   TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    -- 門市打卡裝置（只有登記過的裝置可以打卡）
+    CREATE TABLE IF NOT EXISTS punch_devices (
+      id         SERIAL PRIMARY KEY,
+      token      TEXT NOT NULL UNIQUE,
+      name       TEXT NOT NULL,
+      store      TEXT NOT NULL,
+      revoked    BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
   `);
+  // 員工名單是空的才放入預設人員（之後在後台管理）
+  const { rows: [{ count }] } = await pool.query('SELECT COUNT(*)::int AS count FROM staff');
+  if (count === 0) {
+    for (const name of ['陳淑貞', '黃亭菱', '林岱蓉', '蔡秀梅']) {
+      await pool.query('INSERT INTO staff (name) VALUES ($1) ON CONFLICT DO NOTHING', [name]);
+    }
+  }
   for (const p of PRODUCTS) {
     await pool.query(
       `INSERT INTO products (id, series, name, price) VALUES ($1, $2, $3, $4)
@@ -205,16 +229,131 @@ app.get('/api/pos/sales/today', async (req, res) => {
   res.json({ status: 'success', data: rows.map(toRecord) });
 });
 
-// 前台：打卡
+// ============ 打卡安全：門市裝置 + 員工密碼 ============
+
+function hashPin(pin) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  return `${salt}:${crypto.scryptSync(pin, salt, 32).toString('hex')}`;
+}
+
+function checkPin(pin, stored) {
+  if (!stored) return false;
+  const [salt, hash] = stored.split(':');
+  const actual = crypto.scryptSync(String(pin), salt, 32);
+  return crypto.timingSafeEqual(actual, Buffer.from(hash, 'hex'));
+}
+
+async function findDevice(token) {
+  if (!token) return null;
+  const { rows: [device] } = await pool.query(
+    'SELECT id, name, store FROM punch_devices WHERE token = $1 AND NOT revoked', [String(token)]);
+  return device || null;
+}
+
+// 密碼連續錯 5 次，鎖 5 分鐘（防止亂猜）
+const pinFailures = new Map();
+const MAX_PIN_FAILURES = 5;
+const LOCK_MS = 5 * 60 * 1000;
+
+// 前台：員工名單（只有名字）
+app.get('/api/staff', async (req, res) => {
+  const { rows } = await pool.query('SELECT name FROM staff ORDER BY created_at, name');
+  res.json({ status: 'success', data: rows.map(r => r.name) });
+});
+
+// 前台：檢查這台裝置能不能打卡
+app.get('/api/punch-device', async (req, res) => {
+  const device = await findDevice(req.query.token);
+  if (!device) return res.status(404).json({ status: 'error', message: '這台裝置尚未設定為門市打卡裝置' });
+  res.json({ status: 'success', data: { name: device.name, store: device.store } });
+});
+
+// 前台：打卡（需要門市裝置 + 員工密碼）
 app.post('/api/attendance/punch', async (req, res) => {
-  const { staff, store, type, note } = req.body || {};
-  if (!String(staff || '').trim()) return res.status(400).json({ status: 'error', message: '請選擇人員' });
-  if (!STORE_KEYS[store]) return res.status(400).json({ status: 'error', message: '門市錯誤' });
+  const { staff, type, note, pin, device_token } = req.body || {};
+  const name = String(staff || '').trim();
   if (!['in', 'out'].includes(type)) return res.status(400).json({ status: 'error', message: '打卡類型錯誤' });
+
+  const device = await findDevice(device_token);
+  if (!device) return res.status(403).json({ status: 'error', message: '這台裝置不能打卡，請店長到後台設定' });
+
+  const { rows: [person] } = await pool.query('SELECT * FROM staff WHERE name = $1', [name]);
+  if (!person) return res.status(400).json({ status: 'error', message: '請選擇人員' });
+  if (!person.pin_hash) return res.status(400).json({ status: 'error', message: `${name} 還沒有打卡密碼，請店長到後台設定` });
+
+  const fail = pinFailures.get(name);
+  if (fail && fail.count >= MAX_PIN_FAILURES && Date.now() - fail.at < LOCK_MS) {
+    const min = Math.ceil((LOCK_MS - (Date.now() - fail.at)) / 60000);
+    return res.status(429).json({ status: 'error', message: `密碼錯太多次，請 ${min} 分鐘後再試` });
+  }
+  if (!checkPin(pin || '', person.pin_hash)) {
+    const count = fail && Date.now() - fail.at < LOCK_MS ? fail.count + 1 : 1;
+    pinFailures.set(name, { count, at: Date.now() });
+    const left = MAX_PIN_FAILURES - count;
+    return res.status(401).json({ status: 'error',
+      message: left > 0 ? `密碼錯誤（再錯 ${left} 次會鎖定 5 分鐘）` : '密碼錯太多次，請 5 分鐘後再試' });
+  }
+  pinFailures.delete(name);
+
+  // 門市以裝置設定為準，不能自己選
   const { rows: [row] } = await pool.query(
-    'INSERT INTO attendance (staff, store, type, note) VALUES ($1, $2, $3, $4) RETURNING *',
-    [String(staff).trim(), store, type, String(note || '').trim().slice(0, 200) || null]);
+    'INSERT INTO attendance (staff, store, type, note, device_name) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+    [name, device.store, type, String(note || '').trim().slice(0, 200) || null, device.name]);
   res.json({ status: 'success', message: type === 'in' ? '上班打卡成功' : '下班打卡成功', data: row });
+});
+
+// 後台：員工名單與密碼狀態
+app.get('/api/admin/staff', requireAdmin, async (req, res) => {
+  const { rows } = await pool.query('SELECT name, pin_hash IS NOT NULL AS has_pin FROM staff ORDER BY created_at, name');
+  res.json({ status: 'success', data: rows });
+});
+
+app.post('/api/admin/staff', requireAdmin, async (req, res) => {
+  const name = String(req.body?.name || '').trim().slice(0, 30);
+  if (!name) return res.status(400).json({ status: 'error', message: '請填員工名字' });
+  const { rowCount } = await pool.query('INSERT INTO staff (name) VALUES ($1) ON CONFLICT DO NOTHING', [name]);
+  if (!rowCount) return res.status(400).json({ status: 'error', message: `${name} 已經存在` });
+  res.json({ status: 'success', message: '已新增員工' });
+});
+
+app.post('/api/admin/staff/pin', requireAdmin, async (req, res) => {
+  const { name, pin } = req.body || {};
+  if (!/^\d{4,6}$/.test(String(pin || ''))) return res.status(400).json({ status: 'error', message: '密碼請填 4～6 位數字' });
+  const { rowCount } = await pool.query('UPDATE staff SET pin_hash = $2 WHERE name = $1', [name, hashPin(String(pin))]);
+  if (!rowCount) return res.status(404).json({ status: 'error', message: '找不到這位員工' });
+  pinFailures.delete(name);
+  res.json({ status: 'success', message: '密碼已設定' });
+});
+
+app.post('/api/admin/staff/delete', requireAdmin, async (req, res) => {
+  const { rowCount } = await pool.query('DELETE FROM staff WHERE name = $1', [req.body?.name]);
+  if (!rowCount) return res.status(404).json({ status: 'error', message: '找不到這位員工' });
+  res.json({ status: 'success', message: '已刪除員工（過去的打卡和銷售紀錄會保留）' });
+});
+
+// 後台：門市打卡裝置
+app.get('/api/admin/devices', requireAdmin, async (req, res) => {
+  const { rows } = await pool.query(
+    'SELECT id, name, store, created_at FROM punch_devices WHERE NOT revoked ORDER BY created_at');
+  res.json({ status: 'success', data: rows });
+});
+
+app.post('/api/admin/devices', requireAdmin, async (req, res) => {
+  const name = String(req.body?.name || '').trim().slice(0, 30);
+  const store = req.body?.store;
+  if (!name) return res.status(400).json({ status: 'error', message: '請填裝置名稱（例：高雄櫃台平板）' });
+  if (!STORE_KEYS[store]) return res.status(400).json({ status: 'error', message: '門市錯誤' });
+  const token = crypto.randomBytes(24).toString('hex');
+  const { rows: [device] } = await pool.query(
+    'INSERT INTO punch_devices (token, name, store) VALUES ($1, $2, $3) RETURNING id, name, store, token',
+    [token, name, store]);
+  res.json({ status: 'success', message: '已設定為門市打卡裝置', data: device });
+});
+
+app.post('/api/admin/devices/revoke', requireAdmin, async (req, res) => {
+  const { rowCount } = await pool.query('UPDATE punch_devices SET revoked = TRUE WHERE id = $1', [req.body?.id]);
+  if (!rowCount) return res.status(404).json({ status: 'error', message: '找不到這台裝置' });
+  res.json({ status: 'success', message: '已停用這台裝置' });
 });
 
 // 前台：今日打卡紀錄（指定門市）
