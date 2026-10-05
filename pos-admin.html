@@ -106,7 +106,7 @@
             <div class="filter-bar" style="align-items: center;">
                 <input type="search" id="customerSearch" placeholder="🔍 搜尋姓名、電話、地址" oninput="renderCustomers()" style="flex: 1; min-width: 200px;">
                 <button onclick="loadCustomers()">🔄 重新整理</button>
-                <button class="secondary" onclick="exportCustomers()">⬇️ 匯出 CSV</button>
+                <button class="secondary" onclick="exportCustomers()">⬇️ 匯出 Excel</button>
                 <button onclick="document.getElementById('importFile').click()">⬆️ 匯入顧客</button>
                 <input type="file" id="importFile" accept=".xlsx,.xls,.csv" hidden onchange="previewImport(this.files[0]); this.value = ''">
             </div>
@@ -274,7 +274,7 @@
                 </select>
                 <input type="search" id="salesSearch" placeholder="🔍 商品、顧客" oninput="renderSales()" style="width: 160px;">
                 <button onclick="loadSalesRecords()">🔄 重新整理</button>
-                <button class="secondary" onclick="exportSales()">⬇️ 匯出</button>
+                <button class="secondary" onclick="exportSales()">⬇️ 匯出 Excel</button>
                 <button class="secondary" onclick="document.getElementById('salesImportFile').click()">⬆️ 匯入</button>
                 <input type="file" id="salesImportFile" accept=".xlsx,.xls,.csv" hidden onchange="previewSalesImport(this.files[0]); this.value = ''">
             </div>
@@ -490,6 +490,24 @@
             });
         }
 
+        // 匯出成 Excel（.xlsx）：舊版 Excel 打開 CSV 會中文亂碼，所以直接產生 .xlsx
+        async function exportXlsx(rows, fileName, sheetName) {
+            try {
+                await loadSheetLibrary();
+            } catch (error) {
+                alert(error.message);
+                return;
+            }
+            const ws = XLSX.utils.aoa_to_sheet(rows);
+            // 欄寬依內容長度（中文算 2 格），最寬 40
+            ws['!cols'] = rows[0].map((_, c) => ({
+                wch: Math.min(40, Math.max(...rows.map(r => [...String(r[c] ?? '')].reduce((w, ch) => w + (ch.charCodeAt(0) > 255 ? 2 : 1), 0))) + 2)
+            }));
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, sheetName);
+            XLSX.writeFile(wb, fileName);
+        }
+
         // 讀 Excel / CSV 的第一個工作表。CSV 先用 UTF-8 解碼，看起來是亂碼就改用 Big5（台灣版 Excel 存 CSV 常用 Big5）
         async function readSheetRows(file) {
             await loadSheetLibrary();
@@ -604,13 +622,9 @@
 
         function exportCustomers() {
             const rows = [['姓名', '電話', '地址', '生日', '備註', '來源', '購買次數', '累計消費', '最近消費', '建檔日期'],
-                ...filteredCustomers().map(c => [c.name, c.phone ? `'${c.phone}` : '', c.address, c.birthday ? String(c.birthday).slice(0, 10) : '',
-                    c.note, c.source, custOrders(c), custSpent(c), fmtDate(c.last_visit), fmtDate(c.created_at)])];
-            const csv = rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));
-            a.download = `野烏金顧客名單_${today()}.csv`;
-            a.click();
+                ...filteredCustomers().map(c => [c.name || '', c.phone || '', c.address || '', c.birthday ? String(c.birthday).slice(0, 10) : '',
+                    c.note || '', c.source || '', custOrders(c), custSpent(c), fmtDate(c.last_visit), fmtDate(c.created_at)])];
+            exportXlsx(rows, `野烏金顧客名單_${today()}.xlsx`, '顧客名單');
         }
 
         // ============ 打卡設定：門市裝置 + 員工密碼 ============
@@ -1286,14 +1300,11 @@
         function exportSales() {
             const list = filteredSales();
             if (!list.length) { alert('沒有可以匯出的紀錄'); return; }
+            // 統編、單號用文字，Excel 才不會把開頭的 0 吃掉或變成科學記號
             const rows = [SALES_COLUMNS.map(c => c[1]), ...list.map(r => SALES_COLUMNS.map(([k]) =>
-                k === 'time' ? twDateTime(r.timestamp) : k === 'tax_id' && r.tax_id ? `'${r.tax_id}` : r[k] ?? ''))];
-            const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+                k === 'time' ? twDateTime(r.timestamp) : ['tax_id', 'order_no'].includes(k) ? String(r[k] ?? '') : r[k] ?? ''))];
             const from = document.getElementById('salesFrom').value || '全部', to = document.getElementById('salesTo').value || '全部';
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));
-            a.download = `野烏金交易紀錄_${from}_${to}.csv`;
-            a.click();
+            exportXlsx(rows, `野烏金交易紀錄_${from}_${to}.xlsx`, '交易紀錄');
         }
 
         // ---- 匯入 ----
