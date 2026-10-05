@@ -728,9 +728,11 @@
             searchTimer = setTimeout(async () => {
                 const box = document.getElementById('custResults');
                 const q = document.getElementById('custQuery').value.trim();
-                // 沒輸入就不列出顧客；打第一個字就開始搜尋
-                if (!q) {
-                    box.innerHTML = '<div class="empty">輸入電話或姓名，就會列出符合的顧客</div>';
+                // 電話至少 3 碼才列出顧客（姓名打 1 個字就可以）
+                const digits = q.replace(/[\s\-()]/g, '');
+                const isPhone = /^\d+$/.test(digits);
+                if (!q || (isPhone && digits.length < 3)) {
+                    box.innerHTML = `<div class="empty">${q ? `再輸入 ${3 - digits.length} 碼…` : '輸入電話（至少 3 碼）或姓名，就會列出符合的顧客'}</div>`;
                     return;
                 }
                 try {
