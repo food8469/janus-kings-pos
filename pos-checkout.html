@@ -218,7 +218,7 @@
 
             <!-- 顧客 -->
             <div class="cart-row clickable" id="customerRow" onclick="openCustomerModal()">
-                <span><span class="row-icon">👤</span><span id="customerLabel">新增顧客</span></span>
+                <span><span class="row-icon">👤</span><span id="customerLabel">搜尋 / 新增顧客</span></span>
                 <span class="row-actions">
                     <button class="row-clear" id="customerClear" hidden title="不指定顧客" onclick="event.stopPropagation(); setCustomer(null)">✕</button>
                     <button class="row-plus" title="新增顧客" onclick="event.stopPropagation(); openCustomerModal('new')">＋</button>
@@ -627,7 +627,7 @@
             const label = document.getElementById('customerLabel');
             label.innerHTML = c
                 ? `${esc(customerText(c))}${c.name && c.phone ? `<span class="cust-phone">${esc(c.phone)}</span>` : ''}`
-                : '新增顧客';
+                : '搜尋 / 新增顧客';
             document.getElementById('customerClear').hidden = !c;
         }
 
