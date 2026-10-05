@@ -74,6 +74,8 @@ async function initDb() {
     ALTER TABLE products ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT '一口吃';
     -- 同一次結帳的品項共用一個單號
     ALTER TABLE sales ADD COLUMN IF NOT EXISTS order_no TEXT;
+    -- 整單折扣分到這一項的金額（total 已扣掉）
+    ALTER TABLE sales ADD COLUMN IF NOT EXISTS discount INTEGER NOT NULL DEFAULT 0;
     -- 人員打卡
     CREATE TABLE IF NOT EXISTS attendance (
       id         SERIAL PRIMARY KEY,
@@ -209,14 +211,21 @@ app.post('/api/sales/create', requireDevice, async (req, res) => {
     }
 
     // 庫存不足仍可結帳（庫存會變負數，後台看得到），避免庫存沒登錄時店裡無法賣東西
+    // 整單折扣分到這個品項的金額（不能超過這項的金額）
+    const lineDiscount = toInt(req.body?.discount, '折扣') ?? 0;
+    if (lineDiscount > product.price * qty) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ status: 'error', message: '折扣不能超過商品金額' });
+    }
+
     await client.query(
       `UPDATE products SET ${storeKey} = ${storeKey} - $1 WHERE id = $2`, [qty, product.id]);
 
     const { rows: [row] } = await client.query(
-      `INSERT INTO sales (product_id, product_name, price, quantity, total, store, staff, customer_name, order_no)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
-      [product.id, `${product.series}-${product.name}`, product.price, qty, product.price * qty,
-       store, staff, (customer_name || '').trim() || '客人', String(order_no || '').slice(0, 40) || null]
+      `INSERT INTO sales (product_id, product_name, price, quantity, total, store, staff, customer_name, order_no, discount)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+      [product.id, `${product.series}-${product.name}`, product.price, qty, product.price * qty - lineDiscount,
+       store, staff, (customer_name || '').trim() || '客人', String(order_no || '').slice(0, 40) || null, lineDiscount]
     );
     await client.query('COMMIT');
 
@@ -241,6 +250,7 @@ function toRecord(r) {
     staff: r.staff,
     customer_name: r.customer_name,
     order_no: r.order_no,
+    discount: r.discount || 0,
   };
 }
 
@@ -444,7 +454,9 @@ app.post('/api/admin/sales/update', requireAdmin, async (req, res) => {
         `UPDATE products SET ${storeKey} = ${storeKey} - $1 WHERE id = $2`, [newQty - sale.quantity, sale.product_id]);
     }
     const { rows: [row] } = await client.query(
-      `UPDATE sales SET quantity = $2, total = price * $2,
+      `UPDATE sales SET quantity = $2,
+              discount = LEAST(discount, price * $2),
+              total = price * $2 - LEAST(discount, price * $2),
               staff = COALESCE($3, staff), customer_name = COALESCE($4, customer_name)
        WHERE id = $1 RETURNING *`,
       [id, newQty, String(staff || '').trim() || null,

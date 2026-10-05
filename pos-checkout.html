@@ -73,6 +73,31 @@
 
         [hidden] { display: none !important; }
 
+        /* ===== 購物車（清單式排版）===== */
+        .cart-panel { padding: 0; background: white; }
+        .cart-head { display: flex; align-items: center; padding: 14px 16px; border-bottom: 1px solid #eee; }
+        .cart-title { flex: 1; text-align: center; font-size: 17px; font-weight: bold; color: #333; }
+        .cart-title span { font-weight: normal; color: #888; font-size: 14px; }
+        .icon-btn { background: none; border: none; font-size: 20px; cursor: pointer; padding: 4px 8px; border-radius: 6px; }
+        .icon-btn:hover { background: #f1f3f5; }
+        .cart-store { font-size: 12px; color: #667eea; background: #eef1ff; padding: 3px 10px; border-radius: 10px; white-space: nowrap; }
+        .cart-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 14px 16px; border-bottom: 1px solid #f0f0f0; font-size: 15px; color: #333; }
+        .cart-row.clickable { cursor: pointer; color: #555; }
+        .cart-row.clickable:hover { background: #fafafa; }
+        .cart-row input, .cart-row select { width: auto; flex: 1; min-width: 0; }
+        .row-icon { font-size: 18px; margin-right: 10px; }
+        .row-clear { background: none; border: none; color: #999; font-size: 16px; cursor: pointer; padding: 2px 6px; }
+        .cart-items { flex: 1; overflow-y: auto; background: #f7f7f7; padding: 4px 12px; min-height: 120px; }
+        .cart-empty { color: #aaa; text-align: center; padding: 40px 0; font-size: 14px; }
+        .cart-bottom { border-top: 1px solid #eee; }
+        .discount-amt { color: #e03131; font-weight: bold; }
+        .discount-edit select { flex: 0 0 auto; width: 90px; }
+        .staff-select { max-width: 60%; }
+        .small-btn { padding: 8px 12px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; white-space: nowrap; font-family: inherit; }
+        .small-btn.ghost { background: #f1f3f5; color: #555; }
+        .checkout-btn.big { margin: 14px 16px 10px; width: calc(100% - 32px); font-size: 18px; padding: 16px; border-radius: 10px; }
+        #message { margin: 0 16px 12px; }
+
         /* ===== 未授權裝置的鎖定畫面 ===== */
         .lock-screen { position: fixed; inset: 0; z-index: 2000; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; padding: 20px; overflow-y: auto; }
         .lock-card { background: white; border-radius: 12px; padding: 28px 24px; width: 100%; max-width: 400px; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,0.25); }
@@ -157,51 +182,63 @@
             </div>
         </div>
 
-        <div class="right" id="cartPanel">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                <h2>🛒 購物車</h2>
-                <button class="menu-btn" onclick="toggleCart()" style="display: none; font-size: 20px; padding: 10px;">✕</button>
+        <div class="right cart-panel" id="cartPanel">
+            <!-- 標題列：清空購物車 / 購物車件數 / 門市 -->
+            <div class="cart-head">
+                <button class="icon-btn" onclick="clearCart()" title="清空購物車">🗑</button>
+                <div class="cart-title">購物車 <span id="cartCount">(0件)</span></div>
+                <span class="cart-store" id="cartStoreLabel"></span>
+            </div>
+            <!-- 門市由裝置登記決定，不顯示選單 -->
+            <select id="store" hidden>
+                <option value="高雄">高雄</option>
+                <option value="台中">台中</option>
+            </select>
+
+            <!-- 顧客 -->
+            <div class="cart-row clickable" id="customerRow" onclick="editCustomer()">
+                <span><span class="row-icon">👤</span><span id="customerLabel">新增顧客</span></span>
+                <button class="row-clear" id="customerClear" hidden onclick="event.stopPropagation(); setCustomer('')">✕</button>
+            </div>
+            <div class="cart-row" id="customerEdit" hidden>
+                <input type="text" id="customerName" placeholder="客人名字" maxlength="30"
+                       onkeydown="if (event.key === 'Enter') setCustomer(this.value)">
+                <button class="small-btn" onclick="setCustomer(document.getElementById('customerName').value)">確定</button>
             </div>
 
-            <div id="cartItems" style="flex: 1; overflow-y: auto; margin-bottom: 15px;"></div>
+            <!-- 購物車商品 -->
+            <div id="cartItems" class="cart-items"></div>
 
-            <div class="summary">
-                <div class="summary-row">
-                    <span>商品數量：</span>
-                    <span id="totalQty">0</span>
+            <div class="cart-bottom">
+                <div class="cart-row">
+                    <span>小計</span>
+                    <span id="subtotal">NT$0</span>
                 </div>
-                <div class="summary-row total">
-                    <span>總金額：</span>
-                    <span id="totalAmount">NT$0</span>
-                </div>
-            </div>
 
-            <div class="checkout-form">
-                <div class="form-group">
-                    <label>門市</label>
-                    <select id="store">
-                        <option value="高雄">高雄</option>
-                        <option value="台中">台中</option>
+                <!-- 整單折扣 -->
+                <div class="cart-row clickable" id="discountRow" onclick="editDiscount()">
+                    <span><span class="row-icon">🏷️</span><span id="discountLabel">新增整單折扣</span></span>
+                    <span id="discountAmount" class="discount-amt"></span>
+                </div>
+                <div class="cart-row discount-edit" id="discountEdit" hidden>
+                    <select id="discountType" onchange="updateDiscountPlaceholder()">
+                        <option value="amount">減金額</option>
+                        <option value="percent">打折</option>
                     </select>
+                    <input type="number" id="discountValue" min="0" step="any" placeholder="例：100"
+                           onkeydown="if (event.key === 'Enter') applyDiscount()">
+                    <button class="small-btn" onclick="applyDiscount()">套用</button>
+                    <button class="small-btn ghost" onclick="clearDiscount()">移除</button>
                 </div>
 
-                <div class="form-group">
-                    <label>銷售人員</label>
-                    <select id="staff">
+                <div class="cart-row">
+                    <span>銷售人員</span>
+                    <select id="staff" class="staff-select">
                         <option value="">-- 選擇人員 --</option>
-                        <option value="陳淑貞">陳淑貞</option>
-                        <option value="黃亭菱">黃亭菱</option>
-                        <option value="林岱蓉">林岱蓉</option>
-                        <option value="蔡秀梅">蔡秀梅</option>
                     </select>
                 </div>
 
-                <div class="form-group">
-                    <label>客戶名稱 (選填)</label>
-                    <input type="text" id="customerName" placeholder="客人名字">
-                </div>
-
-                <button class="checkout-btn" onclick="checkout()">✓ 完成結帳</button>
+                <button class="checkout-btn big" id="checkoutBtn" onclick="checkout()">結帳　<span id="totalAmount">NT$0</span></button>
                 <div id="message"></div>
             </div>
         </div>
@@ -337,6 +374,7 @@
                 select.value = punchDevice.store;
                 select.disabled = true;
             });
+            document.getElementById('cartStoreLabel').textContent = `📍 ${punchDevice.store}門市`;
             loadProducts();
             loadStaff();
         }
@@ -517,6 +555,76 @@
             }
         }
 
+        // ---- 顧客 ----
+        let customer = '';
+
+        function editCustomer() {
+            document.getElementById('customerRow').hidden = true;
+            document.getElementById('customerEdit').hidden = false;
+            const input = document.getElementById('customerName');
+            input.value = customer;
+            input.focus();
+        }
+
+        function setCustomer(name) {
+            customer = String(name || '').trim();
+            document.getElementById('customerEdit').hidden = true;
+            document.getElementById('customerRow').hidden = false;
+            document.getElementById('customerLabel').textContent = customer || '新增顧客';
+            document.getElementById('customerClear').hidden = !customer;
+        }
+
+        // ---- 整單折扣：減金額，或打折（9 折填 9、85 折填 85）----
+        let discount = null;   // { type: 'amount' | 'percent', value }
+
+        function editDiscount() {
+            document.getElementById('discountEdit').hidden = false;
+            updateDiscountPlaceholder();
+            document.getElementById('discountValue').focus();
+        }
+
+        function updateDiscountPlaceholder() {
+            const type = document.getElementById('discountType').value;
+            document.getElementById('discountValue').placeholder = type === 'amount' ? '例：100' : '9 折填 9，85 折填 85';
+        }
+
+        // 打折數字換成付款比例：9 → 0.9、8.5 → 0.85、85 → 0.85
+        function discountRate(v) {
+            return v < 10 ? v / 10 : v / 100;
+        }
+
+        function applyDiscount() {
+            const type = document.getElementById('discountType').value;
+            const value = Number(document.getElementById('discountValue').value);
+            if (!value || value <= 0) return showMessage('請輸入折扣', 'error');
+            if (type === 'amount' && !Number.isInteger(value)) return showMessage('折扣金額請填整數', 'error');
+            if (type === 'percent' && !(discountRate(value) > 0 && discountRate(value) < 1)) return showMessage('打折請填 1～99，例如 9 折填 9', 'error');
+            discount = { type, value };
+            document.getElementById('discountEdit').hidden = true;
+            renderCart();
+        }
+
+        function clearDiscount() {
+            discount = null;
+            document.getElementById('discountValue').value = '';
+            document.getElementById('discountEdit').hidden = true;
+            renderCart();
+        }
+
+        function discountOf(subtotal) {
+            if (!discount || subtotal <= 0) return 0;
+            const d = discount.type === 'amount' ? discount.value : Math.round(subtotal * (1 - discountRate(discount.value)));
+            return Math.min(Math.max(d, 0), subtotal);
+        }
+
+        function clearCart() {
+            if (!Object.keys(cart).length) return;
+            if (!confirm('確定要清空購物車？')) return;
+            cart = {};
+            renderCart();
+            if (currentSeries) renderItemsView();
+        }
+
         function renderCart() {
             const cartDiv = document.getElementById('cartItems');
             cartDiv.innerHTML = '';
@@ -543,33 +651,55 @@
                 `;
             });
 
-            document.getElementById('totalQty').textContent = totalQty;
-            document.getElementById('totalAmount').textContent = `NT$${totalAmount.toLocaleString()}`;
+            if (!totalQty) cartDiv.innerHTML = '<div class="cart-empty">購物車是空的<br>從左邊點選商品加入</div>';
+
+            const off = discountOf(totalAmount);
+            document.getElementById('cartCount').textContent = `(${totalQty}件)`;
+            document.getElementById('subtotal').textContent = `NT$${totalAmount.toLocaleString()}`;
+            document.getElementById('discountLabel').textContent = !discount ? '新增整單折扣'
+                : discount.type === 'amount' ? `整單折扣：減 NT$${discount.value.toLocaleString()}` : `整單折扣：${discount.value} 折`;
+            document.getElementById('discountAmount').textContent = off ? `-NT$${off.toLocaleString()}` : '';
+            document.getElementById('totalAmount').textContent = `NT$${(totalAmount - off).toLocaleString()}`;
         }
 
         async function checkout() {
             const staff = document.getElementById('staff').value;
             const store = document.getElementById('store').value;
-            const customerName = document.getElementById('customerName').value;
-
-            if (!staff) {
-                showMessage('請選擇銷售人員', 'error');
-                return;
-            }
 
             if (Object.keys(cart).length === 0) {
                 showMessage('購物車是空的', 'error');
                 return;
             }
 
-            const btn = event.target;
+            if (!staff) {
+                showMessage('請選擇銷售人員', 'error');
+                return;
+            }
+
+            const btn = document.getElementById('checkoutBtn');
             btn.disabled = true;
 
             // 同一次結帳的品項共用單號，結帳紀錄會合成一張單
             const orderNo = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 
+            // 整單折扣依金額比例分到每個品項，營業額才會正確；
+            // 先按比例分（無條件捨去），剩下的零頭再補給還有空間的品項，每項折扣不超過該項金額
+            const lines = Object.entries(cart).map(([productId, item]) => ({ productId, item, gross: item.qty * item.price }));
+            const subtotal = lines.reduce((s, l) => s + l.gross, 0);
+            const off = discountOf(subtotal);
+            let remaining = off;
+            lines.forEach(l => {
+                l.discount = Math.min(l.gross, Math.floor(off * l.gross / subtotal));
+                remaining -= l.discount;
+            });
+            for (const l of lines) {
+                const add = Math.min(remaining, l.gross - l.discount);
+                l.discount += add;
+                remaining -= add;
+            }
+
             try {
-                for (const [productId, item] of Object.entries(cart)) {
+                for (const { productId, item, discount: lineDiscount } of lines) {
                     const res = await posFetch(`/api/sales/create`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -578,8 +708,9 @@
                             quantity: item.qty,
                             store: store,
                             staff: staff,
-                            customer_name: customerName,
-                            order_no: orderNo
+                            customer_name: customer,
+                            order_no: orderNo,
+                            discount: lineDiscount
                         })
                     });
 
@@ -593,7 +724,8 @@
 
                 showMessage('✓ 結帳成功！', 'success');
                 cart = {};
-                document.getElementById('customerName').value = '';
+                setCustomer('');
+                clearDiscount();
                 renderCart();
                 loadProducts(); // 更新庫存數字
                 btn.disabled = false;
@@ -762,6 +894,7 @@
                     if (!o) orders.push(o = { no: r.order_no, time: r.timestamp, staff: r.staff, customer: r.customer_name, lines: [], total: 0 });
                     o.lines.push(r);
                     o.total += r.total;
+                    o.discount = (o.discount || 0) + (r.discount || 0);
                 });
 
                 document.getElementById('dayOrders').textContent = orders.length;
@@ -777,8 +910,9 @@
                         ${o.lines.map(l => `
                             <div class="order-line">
                                 <span>${esc(l.product_name)} × ${l.quantity}</span>
-                                <span>NT$${l.total.toLocaleString()}</span>
+                                <span>NT$${(l.price * l.quantity).toLocaleString()}</span>
                             </div>`).join('')}
+                        ${o.discount ? `<div class="order-line" style="color:#e03131"><span>整單折扣</span><span>-NT$${o.discount.toLocaleString()}</span></div>` : ''}
                         <div class="order-total"><span>合計</span><span>NT$${o.total.toLocaleString()}</span></div>
                     </div>`).join('') : '<div class="empty">今天還沒有結帳紀錄</div>';
             } catch (error) {
