@@ -268,17 +268,28 @@ function toRecord(r) {
 // ============ 顧客 ============
 const cleanText = (v, max) => String(v ?? '').trim().slice(0, max) || null;
 
-// 搜尋顧客（姓名或電話）；沒輸入就列出最近建立的
+// 搜尋顧客（姓名、電話、地址）；沒輸入就列出最近建立的。?all=1 給後台列出全部
 app.get('/api/customers', requireDevice, async (req, res) => {
   const q = String(req.query.q || '').trim();
+  const limit = req.query.all ? 5000 : 30;
   const { rows } = await pool.query(
     `SELECT c.*,
             (SELECT COUNT(DISTINCT COALESCE(order_no, id::text)) FROM sales WHERE customer_id = c.id)::int AS orders,
+            (SELECT COALESCE(SUM(total), 0) FROM sales WHERE customer_id = c.id)::int AS spent,
             (SELECT MAX(created_at) FROM sales WHERE customer_id = c.id) AS last_visit
      FROM customers c
-     WHERE $1 = '' OR c.name ILIKE '%' || $1 || '%' OR c.phone ILIKE '%' || $1 || '%'
-     ORDER BY c.created_at DESC LIMIT 30`, [q]);
+     WHERE $1 = '' OR c.name ILIKE '%' || $1 || '%' OR c.phone ILIKE '%' || $1 || '%' OR c.address ILIKE '%' || $1 || '%'
+     ORDER BY c.created_at DESC LIMIT ${limit}`, [q]);
   res.json({ status: 'success', data: rows });
+});
+
+// 後台：刪除顧客（過去的銷售紀錄保留，只是不再連到這位顧客）
+app.post('/api/admin/customers/delete', requireAdmin, async (req, res) => {
+  const id = toInt(req.body?.id, '顧客');
+  const { rowCount } = await pool.query('DELETE FROM customers WHERE id = $1', [id]);
+  if (!rowCount) return res.status(404).json({ status: 'error', message: '找不到這位顧客' });
+  await pool.query('UPDATE sales SET customer_id = NULL WHERE customer_id = $1', [id]);
+  res.json({ status: 'success', message: '已刪除顧客（過去的銷售紀錄會保留）' });
 });
 
 // 新增顧客（三個欄位都可以空白，但至少要填一個）

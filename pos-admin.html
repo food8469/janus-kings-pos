@@ -90,9 +90,28 @@
             <button class="tab-btn" onclick="showTab('inventory')">📦 庫存管理</button>
             <button class="tab-btn" onclick="showTab('sales')">💰 交易紀錄</button>
             <button class="tab-btn" onclick="showTab('staff')">👥 員工統計</button>
+            <button class="tab-btn" onclick="showTab('customers')">👥 顧客</button>
             <button class="tab-btn" onclick="showTab('stocktake')">📋 盤點紀錄</button>
             <button class="tab-btn" onclick="showTab('attendance')">🕐 打卡紀錄</button>
             <button class="tab-btn" onclick="showTab('punchSettings')">🔐 裝置與打卡設定</button>
+        </div>
+
+        <!-- 顧客管理 -->
+        <div id="customers" class="content">
+            <h2>顧客管理</h2>
+            <div class="filter-bar" style="align-items: center;">
+                <input type="search" id="customerSearch" placeholder="🔍 搜尋姓名、電話、地址" oninput="renderCustomers()" style="flex: 1; min-width: 200px;">
+                <button onclick="loadCustomers()">🔄 重新整理</button>
+                <button class="secondary" onclick="exportCustomers()">⬇️ 匯出 CSV</button>
+            </div>
+            <div id="customerSummary" class="stat-box"></div>
+            <table id="customerTable">
+                <thead>
+                    <tr><th>姓名</th><th>電話</th><th>地址</th><th>購買次數</th><th>累計消費</th><th>最近消費</th><th></th></tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+            <p class="hint">顧客在前台收銀台的「👤 搜尋 / 新增顧客」建檔。刪除顧客不會刪掉過去的銷售紀錄。</p>
         </div>
 
         <!-- 打卡設定 -->
@@ -290,6 +309,131 @@
             else if (tabName === 'stocktake') loadStocktake();
             else if (tabName === 'attendance') loadAttendance();
             else if (tabName === 'punchSettings') loadPunchSettings();
+            else if (tabName === 'customers') loadCustomers();
+        }
+
+        // ============ 顧客管理 ============
+        let allCustomers = [];
+        let openCustomerId = null;
+        const fmtDate = (t) => t ? new Date(t).toLocaleDateString('zh-TW', { timeZone: 'Asia/Taipei' }) : '-';
+
+        async function loadCustomers() {
+            try {
+                allCustomers = (await api('/api/customers?all=1')).data;
+                renderCustomers();
+            } catch (error) {
+                alert('載入顧客失敗: ' + error.message);
+            }
+        }
+
+        function filteredCustomers() {
+            const q = document.getElementById('customerSearch').value.trim().toLowerCase();
+            return allCustomers.filter(c => !q || [c.name, c.phone, c.address].some(v => (v || '').toLowerCase().includes(q)));
+        }
+
+        function renderCustomers() {
+            const list = filteredCustomers();
+            document.getElementById('customerSummary').innerHTML = `
+                <div class="stat"><div class="stat-value">${allCustomers.length}</div><div class="stat-label">建檔顧客</div></div>
+                <div class="stat"><div class="stat-value">${allCustomers.filter(c => c.orders).length}</div><div class="stat-label">有消費紀錄</div></div>
+                <div class="stat"><div class="stat-value">NT$${allCustomers.reduce((s, c) => s + c.spent, 0).toLocaleString()}</div><div class="stat-label">顧客累計消費</div></div>`;
+            document.querySelector('#customerTable tbody').innerHTML = list.length ? list.map(c => `
+                <tr>
+                    <td>${escHtml(c.name || '（未填）')}</td>
+                    <td>${escHtml(c.phone || '')}</td>
+                    <td>${escHtml(c.address || '')}</td>
+                    <td>${c.orders}</td>
+                    <td>NT$${c.spent.toLocaleString()}</td>
+                    <td>${fmtDate(c.last_visit)}</td>
+                    <td style="white-space: nowrap;">
+                        <button class="row-btn" onclick="toggleCustomer(${c.id})">📋 紀錄 / ✏️ 編輯</button>
+                        <button class="row-btn danger" onclick="deleteCustomer(${c.id})">🗑️</button>
+                    </td>
+                </tr>
+                <tr class="detail-row" id="customerDetail${c.id}" hidden><td colspan="7"></td></tr>`).join('')
+                : `<tr><td colspan="7" style="color:#999">${allCustomers.length ? '找不到符合的顧客' : '還沒有建檔的顧客'}</td></tr>`;
+            if (openCustomerId) {
+                const id = openCustomerId;
+                openCustomerId = null;
+                if (document.getElementById(`customerDetail${id}`)) toggleCustomer(id);
+            }
+        }
+
+        async function toggleCustomer(id) {
+            const row = document.getElementById(`customerDetail${id}`);
+            if (!row.hidden) { row.hidden = true; return; }
+            row.hidden = false;
+            const cell = row.firstElementChild;
+            cell.textContent = '載入中…';
+            try {
+                const { customer: c, sales } = (await api(`/api/customers/${id}/history`)).data;
+                const orders = [];
+                sales.forEach(r => {
+                    let o = r.order_no && orders.find(o => o.no === r.order_no);
+                    if (!o) orders.push(o = { no: r.order_no, time: r.timestamp, store: r.store, staff: r.staff, items: [], total: 0, discount: 0 });
+                    o.items.push(`${r.product_name} × ${r.quantity}`);
+                    o.total += r.total;
+                    o.discount += r.discount || 0;
+                });
+                cell.innerHTML = `
+                    <div class="detail-title">✏️ 編輯顧客資料</div>
+                    <div class="input-group">
+                        <input type="text" id="editCustName${id}" value="${escHtml(c.name || '')}" placeholder="姓名" maxlength="30">
+                        <input type="tel" id="editCustPhone${id}" value="${escHtml(c.phone || '')}" placeholder="電話" maxlength="30">
+                        <input type="text" id="editCustAddress${id}" value="${escHtml(c.address || '')}" placeholder="地址" maxlength="200">
+                        <button onclick="saveCustomerEdit(${id})">💾 保存</button>
+                    </div>
+                    <div class="detail-title">📋 歷史購買紀錄（${orders.length} 次）</div>
+                    ${orders.length ? `<table class="detail-table">
+                        <thead><tr><th>時間</th><th>門市</th><th>銷售人員</th><th>商品</th><th>折扣</th><th>金額</th></tr></thead>
+                        <tbody>${orders.map(o => `
+                            <tr>
+                                <td>${new Date(o.time).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false })}</td>
+                                <td>${escHtml(o.store)}</td>
+                                <td>${escHtml(o.staff)}</td>
+                                <td>${o.items.map(escHtml).join('<br>')}</td>
+                                <td>${o.discount ? `-NT$${o.discount.toLocaleString()}` : ''}</td>
+                                <td>NT$${o.total.toLocaleString()}</td>
+                            </tr>`).join('')}
+                        </tbody></table>` : '<p class="hint">還沒有購買紀錄</p>'}`;
+            } catch (error) {
+                cell.innerHTML = `<span style="color:#e03131">載入失敗：${escHtml(error.message)}</span>`;
+            }
+        }
+
+        async function saveCustomerEdit(id) {
+            const val = (p) => document.getElementById(`${p}${id}`).value.trim();
+            const body = { id, name: val('editCustName'), phone: val('editCustPhone'), address: val('editCustAddress') };
+            if (!body.name && !body.phone && !body.address) { alert('請至少填一個欄位'); return; }
+            try {
+                await postJson('/api/customers/update', body);
+                alert('已保存');
+                openCustomerId = id;
+                loadCustomers();
+            } catch (error) {
+                alert('保存失敗: ' + error.message);
+            }
+        }
+
+        async function deleteCustomer(id) {
+            const c = allCustomers.find(c => c.id === id);
+            if (!confirm(`確定要刪除顧客「${c.name || c.phone || c.address}」？\n\n刪除後無法復原，過去的銷售紀錄會保留。`)) return;
+            try {
+                await postJson('/api/admin/customers/delete', { id });
+                loadCustomers();
+            } catch (error) {
+                alert('刪除失敗: ' + error.message);
+            }
+        }
+
+        function exportCustomers() {
+            const rows = [['姓名', '電話', '地址', '購買次數', '累計消費', '最近消費', '建檔日期'],
+                ...filteredCustomers().map(c => [c.name, c.phone, c.address, c.orders, c.spent, fmtDate(c.last_visit), fmtDate(c.created_at)])];
+            const csv = rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));
+            a.download = `野烏金顧客名單_${today()}.csv`;
+            a.click();
         }
 
         // ============ 打卡設定：門市裝置 + 員工密碼 ============
