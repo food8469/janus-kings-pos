@@ -168,15 +168,32 @@
                 <label>月份 <input type="month" id="attendanceMonth" onchange="loadAttendance()"></label>
                 <select id="attendanceStaff" onchange="renderAttendance()"><option value="">全部人員</option></select>
                 <button onclick="loadAttendance()">🔄 重新整理</button>
+                <button class="secondary" onclick="togglePunchCreate()">➕ 補登打卡</button>
             </div>
+
+            <div id="punchCreate" class="section" hidden>
+                <h3>➕ 補登打卡（員工忘記打卡時使用）</h3>
+                <div class="input-group">
+                    <select id="pcStaff"></select>
+                    <select id="pcType"><option value="in">上班</option><option value="out">下班</option></select>
+                    <select id="pcStore"><option value="高雄">高雄</option><option value="台中">台中</option></select>
+                    <input type="datetime-local" id="pcTime">
+                    <input type="text" id="pcNote" placeholder="備註（例：忘記打卡）" maxlength="200">
+                </div>
+                <button onclick="createPunch()">💾 補登</button>
+                <button class="secondary" onclick="togglePunchCreate()">取消</button>
+            </div>
+
             <div id="attendanceSummary" class="stat-box"></div>
+            <div style="overflow-x: auto;">
             <table id="attendanceTable">
                 <thead>
-                    <tr><th>日期</th><th>人員</th><th>門市 / 裝置</th><th>上班</th><th>下班</th><th>工時</th><th>備註</th></tr>
+                    <tr><th>日期</th><th>人員</th><th>門市 / 裝置</th><th>上班</th><th>下班</th><th>工時</th><th>備註</th><th></th></tr>
                 </thead>
                 <tbody></tbody>
             </table>
-            <p class="hint">同一天以「最早的上班」到「最晚的下班」計算工時。沒打到的會顯示「未打卡」。</p>
+            </div>
+            <p class="hint">同一天以「最早的上班」到「最晚的下班」計算工時。沒打到的會顯示「未打卡」。按「✏️ 編輯」可以修改或刪除每一次打卡。</p>
         </div>
 
         <!-- 儀表板 -->
@@ -757,8 +774,10 @@
                 rows.forEach(r => {
                     const date = new Date(r.created_at).toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
                     const key = `${date}|${r.staff}`;
-                    const d = map[key] || (map[key] = { date, staff: r.staff, stores: new Set(), in: null, out: null, notes: [] });
-                    d.stores.add(r.device_name ? `${r.store}（${r.device_name}）` : r.store);
+                    const d = map[key] || (map[key] = { key, date, staff: r.staff, stores: new Set(), devices: new Set(), in: null, out: null, notes: [], punches: [] });
+                    d.stores.add(r.store);
+                    if (r.device_name) d.devices.add(r.device_name);
+                    d.punches.push(r);
                     const t = new Date(r.created_at);
                     if (r.note) {
                         const hm = t.toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false });
@@ -787,22 +806,123 @@
                                   : '<span style="color:#e03131">未打卡</span>';
             const hours = (d) => d.in && d.out && d.out > d.in ? (d.out - d.in) / 3600000 : null;
 
-            document.querySelector('#attendanceTable tbody').innerHTML = days.length ? days.map(d => `
+            document.querySelector('#attendanceTable tbody').innerHTML = days.length ? days.map((d, i) => `
                 <tr>
                     <td>${d.date}</td>
-                    <td>${d.staff}</td>
-                    <td>${[...d.stores].join('、')}</td>
+                    <td>${escHtml(d.staff)}</td>
+                    <td>${escHtml([...d.stores].join('、'))}${d.devices.size ? `<br><small style="color:#888">${escHtml([...d.devices].join('、'))}</small>` : ''}</td>
                     <td>${time(d.in)}</td>
                     <td>${time(d.out)}</td>
                     <td>${hours(d) === null ? '-' : hours(d).toFixed(1) + ' 小時'}</td>
-                    <td style="font-size: 13px; color: #666;">${d.notes.map(n => n.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))).join('<br>')}</td>
-                </tr>`).join('') : '<tr><td colspan="7" style="color:#999">這個月沒有打卡紀錄</td></tr>';
+                    <td style="font-size: 13px; color: #666;">${d.notes.map(escHtml).join('<br>')}</td>
+                    <td><button class="row-btn" onclick="togglePunchDetail(${i})">✏️ 編輯</button></td>
+                </tr>
+                <tr class="detail-row" id="punchDetail${i}" data-key="${escHtml(d.key)}" hidden><td colspan="8"></td></tr>`).join('')
+                : '<tr><td colspan="8" style="color:#999">這個月沒有打卡紀錄</td></tr>';
+            renderedAttendance = days;
+            if (openPunchKey) {
+                const i = days.findIndex(d => d.key === openPunchKey);
+                openPunchKey = null;
+                if (i >= 0) togglePunchDetail(i);
+            }
 
             const totalHours = days.reduce((s, d) => s + (hours(d) || 0), 0);
             document.getElementById('attendanceSummary').innerHTML = `
                 <div class="stat"><div class="stat-value">${days.length}</div><div class="stat-label">出勤人次</div></div>
                 <div class="stat"><div class="stat-value">${totalHours.toFixed(1)}</div><div class="stat-label">總工時（小時）</div></div>
                 <div class="stat"><div class="stat-value">${days.filter(d => !d.in || !d.out).length}</div><div class="stat-label">漏打卡</div></div>`;
+        }
+
+        // ---- 打卡紀錄：逐筆編輯、刪除、補登 ----
+        let renderedAttendance = [];
+        let openPunchKey = null;   // 存檔後保持展開
+        // created_at → datetime-local 用的 YYYY-MM-DDTHH:mm（台灣時間）
+        const toLocalInput = (t) => new Date(t).toLocaleString('sv-SE', { timeZone: 'Asia/Taipei', hour12: false }).slice(0, 16).replace(' ', 'T');
+
+        function togglePunchDetail(i) {
+            const row = document.getElementById(`punchDetail${i}`);
+            if (!row.hidden) { row.hidden = true; return; }
+            row.hidden = false;
+            const d = renderedAttendance[i];
+            const punches = [...d.punches].sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+            row.firstElementChild.innerHTML = `
+                <div class="detail-title">${escHtml(d.staff)}　${d.date} 的每一次打卡</div>
+                <table class="detail-table">
+                    <thead><tr><th>時間</th><th>上班 / 下班</th><th>門市</th><th>備註</th><th>裝置</th><th></th></tr></thead>
+                    <tbody>${punches.map(p => `
+                        <tr data-punch="${p.id}">
+                            <td><input type="datetime-local" class="p-time" value="${toLocalInput(p.created_at)}"></td>
+                            <td><select class="p-type"><option value="in" ${p.type === 'in' ? 'selected' : ''}>上班</option><option value="out" ${p.type === 'out' ? 'selected' : ''}>下班</option></select></td>
+                            <td><select class="p-store"><option ${p.store === '高雄' ? 'selected' : ''}>高雄</option><option ${p.store === '台中' ? 'selected' : ''}>台中</option></select></td>
+                            <td><input type="text" class="p-note" value="${escHtml(p.note || '')}" maxlength="200" style="width: 140px;"></td>
+                            <td style="color:#888">${escHtml(p.device_name || '')}</td>
+                            <td style="white-space: nowrap;">
+                                <button class="row-btn" onclick="savePunch(this, '${escHtml(d.key)}')">💾 保存</button>
+                                <button class="row-btn danger" onclick="deletePunch(this, '${escHtml(d.key)}')">刪除</button>
+                            </td>
+                        </tr>`).join('')}
+                    </tbody>
+                </table>`;
+        }
+
+        async function savePunch(btn, key) {
+            const tr = btn.closest('tr');
+            try {
+                await postJson('/api/admin/attendance/update', {
+                    id: Number(tr.dataset.punch),
+                    time: tr.querySelector('.p-time').value,
+                    type: tr.querySelector('.p-type').value,
+                    store: tr.querySelector('.p-store').value,
+                    note: tr.querySelector('.p-note').value
+                });
+                openPunchKey = key;
+                loadAttendance();
+            } catch (error) {
+                alert('保存失敗: ' + error.message);
+            }
+        }
+
+        async function deletePunch(btn, key) {
+            const tr = btn.closest('tr');
+            const label = `${tr.querySelector('.p-time').value.replace('T', ' ')} ${tr.querySelector('.p-type').selectedOptions[0].text}`;
+            if (!confirm(`確定要刪除這筆打卡？\n\n${label}\n\n刪除後無法復原。`)) return;
+            try {
+                await postJson('/api/admin/attendance/delete', { ids: [Number(tr.dataset.punch)] });
+                openPunchKey = key;
+                loadAttendance();
+            } catch (error) {
+                alert('刪除失敗: ' + error.message);
+            }
+        }
+
+        async function togglePunchCreate() {
+            const box = document.getElementById('punchCreate');
+            box.hidden = !box.hidden;
+            if (box.hidden) return;
+            try {
+                const names = (await api('/api/staff')).data;
+                document.getElementById('pcStaff').innerHTML = '<option value="">-- 選擇人員 --</option>' + names.map(n => `<option>${escHtml(n)}</option>`).join('');
+            } catch (error) { /* 讀不到名單就留空 */ }
+            document.getElementById('pcTime').value = toLocalInput(new Date());
+            document.getElementById('pcNote').value = '';
+        }
+
+        async function createPunch() {
+            const val = (id) => document.getElementById(id).value;
+            if (!val('pcStaff')) { alert('請選擇人員'); return; }
+            if (!val('pcTime')) { alert('請填打卡時間'); return; }
+            try {
+                await postJson('/api/admin/attendance/create', {
+                    staff: val('pcStaff'), type: val('pcType'), store: val('pcStore'), time: val('pcTime'), note: val('pcNote')
+                });
+                alert('已補登打卡');
+                document.getElementById('punchCreate').hidden = true;
+                // 跳到補登的那個月份
+                document.getElementById('attendanceMonth').value = val('pcTime').slice(0, 7);
+                loadAttendance();
+            } catch (error) {
+                alert('補登失敗: ' + error.message);
+            }
         }
 
         // 庫存為負數時用紅色顯示（代表賣出比登錄的庫存多）

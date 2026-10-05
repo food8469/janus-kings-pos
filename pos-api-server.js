@@ -571,6 +571,61 @@ app.get('/api/attendance/today', requireDevice, async (req, res) => {
   res.json({ status: 'success', data: rows });
 });
 
+// 後台：打卡時間（datetime-local 的 YYYY-MM-DDTHH:mm，台灣時間）
+function punchTime(v) {
+  const m = String(v || '').match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})(:\d{2})?$/);
+  return m ? `${m[1]}T${m[2]}${m[3] || ':00'}+08:00` : null;
+}
+
+// 後台：修改一筆打卡（時間、上班/下班、門市、備註）
+app.post('/api/admin/attendance/update', requireAdmin, async (req, res) => {
+  const b = req.body || {};
+  const sets = [], params = [toInt(b.id, '打卡紀錄')];
+  const add = (sql, v) => { params.push(v); sets.push(sql.replace('?', `$${params.length}`)); };
+  if (b.time !== undefined) {
+    const t = punchTime(b.time);
+    if (!t) return res.status(400).json({ status: 'error', message: '時間格式錯誤' });
+    add('created_at = ?', t);
+  }
+  if (b.type !== undefined) {
+    if (!['in', 'out'].includes(b.type)) return res.status(400).json({ status: 'error', message: '請選上班或下班' });
+    add('type = ?', b.type);
+  }
+  if (b.store !== undefined) {
+    if (!STORE_KEYS[b.store]) return res.status(400).json({ status: 'error', message: '門市錯誤' });
+    add('store = ?', b.store);
+  }
+  if (b.note !== undefined) add('note = ?', cleanText(b.note, 200));
+  if (!sets.length) return res.status(400).json({ status: 'error', message: '沒有要修改的欄位' });
+  const { rows: [row] } = await pool.query(`UPDATE attendance SET ${sets.join(', ')} WHERE id = $1 RETURNING *`, params);
+  if (!row) return res.status(404).json({ status: 'error', message: '找不到這筆打卡紀錄' });
+  res.json({ status: 'success', message: '已修改', data: row });
+});
+
+// 後台：刪除打卡紀錄
+app.post('/api/admin/attendance/delete', requireAdmin, async (req, res) => {
+  const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter(Number.isInteger);
+  if (!ids.length) return res.status(400).json({ status: 'error', message: '沒有要刪除的紀錄' });
+  const { rowCount } = await pool.query('DELETE FROM attendance WHERE id = ANY($1)', [ids]);
+  res.json({ status: 'success', message: `已刪除 ${rowCount} 筆打卡紀錄` });
+});
+
+// 後台：補登打卡（員工忘記打卡時）
+app.post('/api/admin/attendance/create', requireAdmin, async (req, res) => {
+  const b = req.body || {};
+  const staff = cleanText(b.staff, 30);
+  const time = punchTime(b.time);
+  if (!staff) return res.status(400).json({ status: 'error', message: '請選擇人員' });
+  if (!['in', 'out'].includes(b.type)) return res.status(400).json({ status: 'error', message: '請選上班或下班' });
+  if (!STORE_KEYS[b.store]) return res.status(400).json({ status: 'error', message: '門市錯誤' });
+  if (!time) return res.status(400).json({ status: 'error', message: '請填打卡時間' });
+  const { rows: [row] } = await pool.query(
+    `INSERT INTO attendance (staff, store, type, note, device_name, created_at)
+     VALUES ($1, $2, $3, $4, '後台補登', $5) RETURNING *`,
+    [staff, b.store, b.type, cleanText(b.note, 200), time]);
+  res.json({ status: 'success', message: '已補登打卡', data: row });
+});
+
 // 後台：打卡紀錄（?month=YYYY-MM）
 app.get('/api/attendance', requireAdmin, async (req, res) => {
   const { sql, params } = dateFilter(req.query);
