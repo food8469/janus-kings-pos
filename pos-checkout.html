@@ -87,6 +87,27 @@
         .cart-row input, .cart-row select { width: auto; flex: 1; min-width: 0; }
         .row-icon { font-size: 18px; margin-right: 10px; }
         .row-clear { background: none; border: none; color: #999; font-size: 16px; cursor: pointer; padding: 2px 6px; }
+        .row-actions { display: flex; align-items: center; gap: 6px; }
+        .row-plus { width: 32px; height: 32px; border-radius: 50%; border: 2px solid #667eea; background: white; color: #667eea; font-size: 20px; line-height: 1; cursor: pointer; display: flex; align-items: center; justify-content: center; }
+        .row-plus:hover { background: #667eea; color: white; }
+        .cust-phone { color: #999; font-size: 13px; margin-left: 8px; }
+
+        /* ===== 顧客小視窗 ===== */
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 1500; display: flex; align-items: center; justify-content: center; padding: 16px; }
+        .modal-card { background: white; border-radius: 12px; width: 100%; max-width: 440px; max-height: 88vh; overflow-y: auto; padding: 16px 20px 20px; box-shadow: 0 10px 40px rgba(0,0,0,0.25); }
+        .modal-head { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+        .modal-head h3 { flex: 1; font-size: 18px; }
+        .menu-back-dark { background: #f1f3f5; border: none; border-radius: 14px; padding: 4px 12px; cursor: pointer; font-family: inherit; }
+        .modal-card label { display: block; font-size: 13px; color: #555; margin: 10px 0 4px; }
+        .modal-card input { padding: 11px; font-size: 15px; }
+        .hint-text { font-size: 12px; color: #999; margin-top: 8px; }
+        .cust-results { margin: 10px 0; max-height: 45vh; overflow-y: auto; }
+        .cust-item { display: flex; justify-content: space-between; align-items: center; padding: 12px; border: 1px solid #eee; border-radius: 8px; margin-bottom: 6px; cursor: pointer; }
+        .cust-item:hover { border-color: #667eea; background: #f7f8ff; }
+        .cust-item small { display: block; color: #999; font-size: 12px; margin-top: 2px; }
+        .cust-info { background: #f7f8ff; border-radius: 8px; padding: 12px 14px; font-size: 14px; line-height: 1.8; }
+        .cust-buttons { display: flex; gap: 8px; align-items: center; }
+        .cust-buttons .checkout-btn { flex: 1; }
         .cart-items { flex: 1; overflow-y: auto; background: #f7f7f7; padding: 4px 12px; min-height: 120px; }
         .cart-empty { color: #aaa; text-align: center; padding: 40px 0; font-size: 14px; }
         .cart-bottom { border-top: 1px solid #eee; }
@@ -196,14 +217,12 @@
             </select>
 
             <!-- 顧客 -->
-            <div class="cart-row clickable" id="customerRow" onclick="editCustomer()">
+            <div class="cart-row clickable" id="customerRow" onclick="openCustomerModal()">
                 <span><span class="row-icon">👤</span><span id="customerLabel">新增顧客</span></span>
-                <button class="row-clear" id="customerClear" hidden onclick="event.stopPropagation(); setCustomer('')">✕</button>
-            </div>
-            <div class="cart-row" id="customerEdit" hidden>
-                <input type="text" id="customerName" placeholder="客人名字" maxlength="30"
-                       onkeydown="if (event.key === 'Enter') setCustomer(this.value)">
-                <button class="small-btn" onclick="setCustomer(document.getElementById('customerName').value)">確定</button>
+                <span class="row-actions">
+                    <button class="row-clear" id="customerClear" hidden title="不指定顧客" onclick="event.stopPropagation(); setCustomer(null)">✕</button>
+                    <button class="row-plus" title="新增顧客" onclick="event.stopPropagation(); openCustomerModal('new')">＋</button>
+                </span>
             </div>
 
             <!-- 購物車商品 -->
@@ -240,6 +259,48 @@
 
                 <button class="checkout-btn big" id="checkoutBtn" onclick="checkout()">結帳　<span id="totalAmount">NT$0</span></button>
                 <div id="message"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 顧客小視窗：搜尋 / 新增 / 編輯 / 歷史紀錄 -->
+    <div id="customerModal" class="modal-overlay" hidden onclick="if (event.target === this) closeCustomerModal()">
+        <div class="modal-card">
+            <div class="modal-head">
+                <button class="menu-back-dark" id="custBack" hidden onclick="showCustomerView('search')">‹ 返回</button>
+                <h3 id="custTitle">顧客</h3>
+                <button class="icon-btn" onclick="closeCustomerModal()">✕</button>
+            </div>
+
+            <!-- 搜尋舊客人 -->
+            <div id="custSearchView">
+                <input type="search" id="custQuery" placeholder="🔍 搜尋姓名或電話" oninput="searchCustomers()">
+                <div id="custResults" class="cust-results"></div>
+                <button class="checkout-btn" onclick="showCustomerView('form')">＋ 新增顧客</button>
+            </div>
+
+            <!-- 新增 / 編輯 -->
+            <div id="custFormView" hidden>
+                <label>姓名</label>
+                <input type="text" id="custName" maxlength="30" placeholder="例：王小姐">
+                <label>電話</label>
+                <input type="tel" id="custPhone" maxlength="30" placeholder="例：0912-345-678">
+                <label>地址</label>
+                <input type="text" id="custAddress" maxlength="200" placeholder="例：高雄市…">
+                <p class="hint-text">都可以不填，想填哪個就填哪個（至少填一個）。</p>
+                <button class="checkout-btn" id="custSaveBtn" onclick="saveCustomer()">💾 儲存並選用</button>
+                <div id="custMessage"></div>
+            </div>
+
+            <!-- 顧客資料 + 歷史紀錄 -->
+            <div id="custDetailView" hidden>
+                <div id="custInfo" class="cust-info"></div>
+                <div class="cust-buttons">
+                    <button class="checkout-btn" onclick="useCustomer(viewingCustomer)">✅ 選用這位顧客</button>
+                    <button class="small-btn ghost" onclick="editCustomerForm(viewingCustomer)">✏️ 編輯資料</button>
+                </div>
+                <div class="list-title">歷史購買紀錄</div>
+                <div id="custHistory"></div>
             </div>
         </div>
     </div>
@@ -555,23 +616,177 @@
             }
         }
 
-        // ---- 顧客 ----
-        let customer = '';
+        // ---- 顧客（建檔、搜尋舊客人、歷史紀錄）----
+        let customer = null;          // 這筆訂單選用的顧客 { id, name, phone, address }
+        let viewingCustomer = null;   // 小視窗正在看 / 編輯的顧客
+        let editingCustomerId = null; // 編輯中（null = 新增）
+        const customerText = (c) => c.name || c.phone || c.address || `顧客 #${c.id}`;
 
-        function editCustomer() {
-            document.getElementById('customerRow').hidden = true;
-            document.getElementById('customerEdit').hidden = false;
-            const input = document.getElementById('customerName');
-            input.value = customer;
-            input.focus();
+        function setCustomer(c) {
+            customer = c;
+            const label = document.getElementById('customerLabel');
+            label.innerHTML = c
+                ? `${esc(customerText(c))}${c.name && c.phone ? `<span class="cust-phone">${esc(c.phone)}</span>` : ''}`
+                : '新增顧客';
+            document.getElementById('customerClear').hidden = !c;
         }
 
-        function setCustomer(name) {
-            customer = String(name || '').trim();
-            document.getElementById('customerEdit').hidden = true;
-            document.getElementById('customerRow').hidden = false;
-            document.getElementById('customerLabel').textContent = customer || '新增顧客';
-            document.getElementById('customerClear').hidden = !customer;
+        // mode：'new' 直接開新增表單；沒給就看有沒有選顧客（有 → 顯示資料，沒有 → 搜尋）
+        function openCustomerModal(mode) {
+            document.getElementById('customerModal').hidden = false;
+            if (mode === 'new') return showCustomerView('form');
+            if (customer) return showCustomerDetail(customer.id);
+            showCustomerView('search');
+        }
+
+        function closeCustomerModal() {
+            document.getElementById('customerModal').hidden = true;
+        }
+
+        function showCustomerView(view) {
+            document.getElementById('custSearchView').hidden = view !== 'search';
+            document.getElementById('custFormView').hidden = view !== 'form';
+            document.getElementById('custDetailView').hidden = view !== 'detail';
+            document.getElementById('custBack').hidden = view === 'search';
+            document.getElementById('custMessage').textContent = '';
+            document.getElementById('custMessage').className = '';
+            if (view === 'search') {
+                document.getElementById('custTitle').textContent = '👤 選擇顧客';
+                searchCustomers();
+                document.getElementById('custQuery').focus();
+            }
+            if (view === 'form' && !editingCustomerId) {
+                document.getElementById('custTitle').textContent = '＋ 新增顧客';
+                document.getElementById('custSaveBtn').textContent = '💾 儲存並選用';
+                ['custName', 'custPhone', 'custAddress'].forEach(id => document.getElementById(id).value = '');
+                document.getElementById('custName').focus();
+            }
+            if (view !== 'form') editingCustomerId = null;
+        }
+
+        let searchTimer = null;
+        function searchCustomers() {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(async () => {
+                const box = document.getElementById('custResults');
+                const q = document.getElementById('custQuery').value.trim();
+                try {
+                    const list = await getJson(`/api/customers?q=${encodeURIComponent(q)}`);
+                    box.innerHTML = list.length ? list.map(c => `
+                        <div class="cust-item" onclick="showCustomerDetail(${c.id})">
+                            <div><b>${esc(c.name || '（未填姓名）')}</b>
+                                <small>${esc(c.phone || '')}${c.phone && c.address ? '　' : ''}${esc(c.address || '')}</small></div>
+                            <small>${c.orders ? `買過 ${c.orders} 次` : '尚無紀錄'}</small>
+                        </div>`).join('')
+                        : `<div class="empty">${q ? '找不到這位顧客，可以按下面「新增顧客」' : '還沒有建檔的顧客'}</div>`;
+                } catch (error) {
+                    box.innerHTML = `<div class="message error">搜尋失敗：${esc(error.message)}</div>`;
+                }
+            }, 250);
+        }
+
+        async function showCustomerDetail(id) {
+            showCustomerView('detail');
+            document.getElementById('custTitle').textContent = '👤 顧客資料';
+            const info = document.getElementById('custInfo');
+            const history = document.getElementById('custHistory');
+            info.textContent = '載入中…';
+            history.innerHTML = '';
+            try {
+                const { customer: c, sales } = await getJson(`/api/customers/${id}/history`);
+                viewingCustomer = c;
+                info.innerHTML = `
+                    <div>👤 ${esc(c.name || '（未填姓名）')}</div>
+                    <div>📞 ${esc(c.phone || '（未填電話）')}</div>
+                    <div>🏠 ${esc(c.address || '（未填地址）')}</div>`;
+
+                // 同單號合成一張單
+                const orders = [];
+                sales.forEach(r => {
+                    let o = r.order_no && orders.find(o => o.no === r.order_no);
+                    if (!o) orders.push(o = { no: r.order_no, time: r.timestamp, store: r.store, staff: r.staff, lines: [], total: 0, discount: 0 });
+                    o.lines.push(r);
+                    o.total += r.total;
+                    o.discount += r.discount || 0;
+                });
+                const spent = orders.reduce((s, o) => s + o.total, 0);
+                history.innerHTML = orders.length
+                    ? `<div class="day-summary" style="margin-bottom: 10px;">
+                           <div><b>${orders.length}</b><span>購買次數</span></div>
+                           <div><b>NT$${spent.toLocaleString()}</b><span>累計消費</span></div>
+                       </div>` + orders.map(o => `
+                        <div class="order-card">
+                            <div class="order-head">
+                                <span>📅 ${new Date(o.time).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false })}</span>
+                                <span>${esc(o.store)}・${esc(o.staff)}</span>
+                            </div>
+                            ${o.lines.map(l => `
+                                <div class="order-line"><span>${esc(l.product_name)} × ${l.quantity}</span><span>NT$${(l.price * l.quantity).toLocaleString()}</span></div>`).join('')}
+                            ${o.discount ? `<div class="order-line" style="color:#e03131"><span>整單折扣</span><span>-NT$${o.discount.toLocaleString()}</span></div>` : ''}
+                            <div class="order-total"><span>合計</span><span>NT$${o.total.toLocaleString()}</span></div>
+                        </div>`).join('')
+                    : '<div class="empty">還沒有購買紀錄</div>';
+            } catch (error) {
+                info.innerHTML = `<span style="color:#e03131">載入失敗：${esc(error.message)}</span>`;
+            }
+        }
+
+        function useCustomer(c) {
+            if (!c) return;
+            setCustomer(c);
+            closeCustomerModal();
+        }
+
+        function editCustomerForm(c) {
+            if (!c) return;
+            editingCustomerId = c.id;
+            showCustomerView('form');
+            document.getElementById('custTitle').textContent = '✏️ 編輯顧客';
+            document.getElementById('custSaveBtn').textContent = '💾 儲存修改';
+            document.getElementById('custName').value = c.name || '';
+            document.getElementById('custPhone').value = c.phone || '';
+            document.getElementById('custAddress').value = c.address || '';
+        }
+
+        async function saveCustomer() {
+            const msg = document.getElementById('custMessage');
+            const body = {
+                name: document.getElementById('custName').value.trim(),
+                phone: document.getElementById('custPhone').value.trim(),
+                address: document.getElementById('custAddress').value.trim()
+            };
+            if (!body.name && !body.phone && !body.address) {
+                msg.className = 'message error';
+                msg.textContent = '請至少填一個欄位';
+                return;
+            }
+            const editing = editingCustomerId;
+            try {
+                const res = await posFetch(editing ? '/api/customers/update' : '/api/customers', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(editing ? { id: editing, ...body } : body)
+                });
+                const data = await res.json();
+                if (res.status === 409 && data.data) {
+                    // 電話已經建檔 → 直接帶出那位顧客
+                    msg.className = 'message error';
+                    msg.textContent = data.message + '，已幫你帶出這位顧客';
+                    setTimeout(() => showCustomerDetail(data.data.id), 900);
+                    return;
+                }
+                if (!res.ok) throw new Error(data.message);
+                if (editing) {
+                    if (customer && customer.id === editing) setCustomer(data.data);
+                    editingCustomerId = null;
+                    showCustomerDetail(editing);
+                } else {
+                    useCustomer(data.data); // 新增完直接選用
+                }
+            } catch (error) {
+                msg.className = 'message error';
+                msg.textContent = '儲存失敗：' + error.message;
+            }
         }
 
         // ---- 整單折扣：減金額，或打折（9 折填 9、85 折填 85）----
@@ -708,7 +923,8 @@
                             quantity: item.qty,
                             store: store,
                             staff: staff,
-                            customer_name: customer,
+                            customer_name: customer ? customerText(customer) : '',
+                            customer_id: customer ? customer.id : null,
                             order_no: orderNo,
                             discount: lineDiscount
                         })
@@ -724,7 +940,7 @@
 
                 showMessage('✓ 結帳成功！', 'success');
                 cart = {};
-                setCustomer('');
+                setCustomer(null);
                 clearDiscount();
                 renderCart();
                 loadProducts(); // 更新庫存數字

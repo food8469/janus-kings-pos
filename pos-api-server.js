@@ -76,6 +76,16 @@ async function initDb() {
     ALTER TABLE sales ADD COLUMN IF NOT EXISTS order_no TEXT;
     -- 整單折扣分到這一項的金額（total 已扣掉）
     ALTER TABLE sales ADD COLUMN IF NOT EXISTS discount INTEGER NOT NULL DEFAULT 0;
+    -- 顧客資料（姓名、電話、地址都可以空白）
+    CREATE TABLE IF NOT EXISTS customers (
+      id         SERIAL PRIMARY KEY,
+      name       TEXT,
+      phone      TEXT,
+      address    TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    ALTER TABLE sales ADD COLUMN IF NOT EXISTS customer_id INTEGER;
+    CREATE INDEX IF NOT EXISTS sales_customer_id_idx ON sales (customer_id);
     -- 人員打卡
     CREATE TABLE IF NOT EXISTS attendance (
       id         SERIAL PRIMARY KEY,
@@ -222,10 +232,11 @@ app.post('/api/sales/create', requireDevice, async (req, res) => {
       `UPDATE products SET ${storeKey} = ${storeKey} - $1 WHERE id = $2`, [qty, product.id]);
 
     const { rows: [row] } = await client.query(
-      `INSERT INTO sales (product_id, product_name, price, quantity, total, store, staff, customer_name, order_no, discount)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING *`,
+      `INSERT INTO sales (product_id, product_name, price, quantity, total, store, staff, customer_name, order_no, discount, customer_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
       [product.id, `${product.series}-${product.name}`, product.price, qty, product.price * qty - lineDiscount,
-       store, staff, (customer_name || '').trim() || '客人', String(order_no || '').slice(0, 40) || null, lineDiscount]
+       store, staff, (customer_name || '').trim() || '客人', String(order_no || '').slice(0, 40) || null, lineDiscount,
+       toInt(req.body?.customer_id, '顧客')]
     );
     await client.query('COMMIT');
 
@@ -253,6 +264,57 @@ function toRecord(r) {
     discount: r.discount || 0,
   };
 }
+
+// ============ 顧客 ============
+const cleanText = (v, max) => String(v ?? '').trim().slice(0, max) || null;
+
+// 搜尋顧客（姓名或電話）；沒輸入就列出最近建立的
+app.get('/api/customers', requireDevice, async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  const { rows } = await pool.query(
+    `SELECT c.*,
+            (SELECT COUNT(DISTINCT COALESCE(order_no, id::text)) FROM sales WHERE customer_id = c.id)::int AS orders,
+            (SELECT MAX(created_at) FROM sales WHERE customer_id = c.id) AS last_visit
+     FROM customers c
+     WHERE $1 = '' OR c.name ILIKE '%' || $1 || '%' OR c.phone ILIKE '%' || $1 || '%'
+     ORDER BY c.created_at DESC LIMIT 30`, [q]);
+  res.json({ status: 'success', data: rows });
+});
+
+// 新增顧客（三個欄位都可以空白，但至少要填一個）
+app.post('/api/customers', requireDevice, async (req, res) => {
+  const name = cleanText(req.body?.name, 30);
+  const phone = cleanText(req.body?.phone, 30);
+  const address = cleanText(req.body?.address, 200);
+  if (!name && !phone && !address) return res.status(400).json({ status: 'error', message: '請至少填一個欄位' });
+  if (phone) {
+    const { rows: [dup] } = await pool.query('SELECT * FROM customers WHERE phone = $1', [phone]);
+    if (dup) return res.status(409).json({ status: 'error', message: `這支電話已經建檔（${dup.name || '未填姓名'}）`, data: dup });
+  }
+  const { rows: [customer] } = await pool.query(
+    'INSERT INTO customers (name, phone, address) VALUES ($1, $2, $3) RETURNING *', [name, phone, address]);
+  res.json({ status: 'success', message: '已新增顧客', data: customer });
+});
+
+// 修改顧客資料
+app.post('/api/customers/update', requireDevice, async (req, res) => {
+  const { rows: [customer] } = await pool.query(
+    'UPDATE customers SET name = $2, phone = $3, address = $4 WHERE id = $1 RETURNING *',
+    [toInt(req.body?.id, '顧客'), cleanText(req.body?.name, 30), cleanText(req.body?.phone, 30), cleanText(req.body?.address, 200)]);
+  if (!customer) return res.status(404).json({ status: 'error', message: '找不到這位顧客' });
+  res.json({ status: 'success', message: '已更新顧客資料', data: customer });
+});
+
+// 顧客的歷史購買紀錄（含以前只打名字、沒有建檔的舊訂單）
+app.get('/api/customers/:id/history', requireDevice, async (req, res) => {
+  const { rows: [customer] } = await pool.query('SELECT * FROM customers WHERE id = $1', [toInt(req.params.id, '顧客')]);
+  if (!customer) return res.status(404).json({ status: 'error', message: '找不到這位顧客' });
+  const { rows } = await pool.query(
+    `SELECT * FROM sales
+     WHERE customer_id = $1 OR (customer_id IS NULL AND $2::text IS NOT NULL AND customer_name = $2)
+     ORDER BY created_at DESC LIMIT 300`, [customer.id, customer.name]);
+  res.json({ status: 'success', data: { customer, sales: rows.map(toRecord) } });
+});
 
 // 台灣時間的「今天」條件
 const TODAY_SQL = `(created_at AT TIME ZONE 'Asia/Taipei')::date = (NOW() AT TIME ZONE 'Asia/Taipei')::date`;
