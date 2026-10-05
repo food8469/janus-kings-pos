@@ -290,6 +290,9 @@ const cleanText = (v, max) => String(v ?? '').trim().slice(0, max) || null;
 // 搜尋顧客（姓名、電話、地址）；沒輸入就列出最近建立的。?all=1 給後台列出全部
 app.get('/api/customers', requireDevice, async (req, res) => {
   const q = String(req.query.q || '').trim();
+  // 電話比對時忽略 - ( ) 空格，手機、市話都能搜；電話開頭符合的排前面
+  const digits = q.replace(/[\s\-()]/g, '');
+  const phoneQ = /^\d+$/.test(digits) ? digits : '';
   const limit = req.query.all ? 5000 : 30;
   const { rows } = await pool.query(
     `SELECT c.*,
@@ -298,7 +301,9 @@ app.get('/api/customers', requireDevice, async (req, res) => {
             (SELECT MAX(created_at) FROM sales WHERE customer_id = c.id) AS last_visit
      FROM customers c
      WHERE $1 = '' OR c.name ILIKE '%' || $1 || '%' OR c.phone ILIKE '%' || $1 || '%' OR c.address ILIKE '%' || $1 || '%'
-     ORDER BY c.created_at DESC LIMIT ${limit}`, [q]);
+        OR ($2 <> '' AND regexp_replace(COALESCE(c.phone, ''), '\\D', '', 'g') LIKE '%' || $2 || '%')
+     ORDER BY ($2 <> '' AND regexp_replace(COALESCE(c.phone, ''), '\\D', '', 'g') LIKE $2 || '%') DESC, c.created_at DESC
+     LIMIT ${limit}`, [q, phoneQ]);
   res.json({ status: 'success', data: rows });
 });
 
@@ -317,8 +322,10 @@ app.post('/api/customers', requireDevice, async (req, res) => {
   const phone = cleanText(req.body?.phone, 30);
   const address = cleanText(req.body?.address, 200);
   if (!name && !phone && !address) return res.status(400).json({ status: 'error', message: '請至少填一個欄位' });
-  if (phone) {
-    const { rows: [dup] } = await pool.query('SELECT * FROM customers WHERE phone = $1', [phone]);
+  if (phone && /\d/.test(phone)) {
+    // 只比數字：0912-345-678 和 0912345678 算同一支電話
+    const { rows: [dup] } = await pool.query(
+      `SELECT * FROM customers WHERE regexp_replace(COALESCE(phone, ''), '\\D', '', 'g') = regexp_replace($1, '\\D', '', 'g') LIMIT 1`, [phone]);
     if (dup) return res.status(409).json({ status: 'error', message: `這支電話已經建檔（${dup.name || '未填姓名'}）`, data: dup });
   }
   const { rows: [customer] } = await pool.query(

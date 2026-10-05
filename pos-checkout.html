@@ -325,7 +325,7 @@
 
             <!-- 搜尋舊客人 -->
             <div id="custSearchView">
-                <input type="search" id="custQuery" placeholder="🔍 輸入電話前 4 碼或姓名" inputmode="search" autocomplete="off" oninput="searchCustomers()">
+                <input type="search" id="custQuery" placeholder="🔍 輸入電話（手機或市話）或姓名" inputmode="search" autocomplete="off" oninput="searchCustomers()">
                 <div id="custResults" class="cust-results"></div>
                 <button class="checkout-btn" onclick="showCustomerView('form')">＋ 新增顧客</button>
             </div>
@@ -335,7 +335,7 @@
                 <label>姓名</label>
                 <input type="text" id="custName" maxlength="30" placeholder="例：王小姐">
                 <label>電話</label>
-                <input type="tel" id="custPhone" maxlength="30" placeholder="例：0912-345-678">
+                <input type="tel" id="custPhone" maxlength="30" placeholder="手機或市話，例：0912-345-678、07-123-4567">
                 <label>地址</label>
                 <input type="text" id="custAddress" maxlength="200" placeholder="例：高雄市…">
                 <p class="hint-text">都可以不填，想填哪個就填哪個（至少填一個）。</p>
@@ -728,11 +728,9 @@
             searchTimer = setTimeout(async () => {
                 const box = document.getElementById('custResults');
                 const q = document.getElementById('custQuery').value.trim();
-                // 還沒輸入夠就不列出顧客：電話至少 4 碼，姓名至少 1 個字
-                const digits = q.replace(/[\s-]/g, '');
-                const enough = /^\d+$/.test(digits) ? digits.length >= 4 : q.length >= 1;
-                if (!enough) {
-                    box.innerHTML = `<div class="empty">${q ? `再輸入 ${4 - digits.length} 碼…` : '輸入電話前 4 碼或姓名，就會列出符合的顧客'}</div>`;
+                // 沒輸入就不列出顧客；打第一個字就開始搜尋
+                if (!q) {
+                    box.innerHTML = '<div class="empty">輸入電話或姓名，就會列出符合的顧客</div>';
                     return;
                 }
                 try {
