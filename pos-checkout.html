@@ -4,6 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>野烏金 POS - 前台結帳</title>
+    <!-- 加到主畫面成為 App -->
+    <link rel="manifest" href="/manifest-pos.webmanifest">
+    <meta name="theme-color" content="#667eea">
+    <link rel="apple-touch-icon" href="/icon-pos-180.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="野烏金收銀">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Microsoft JhengHei', sans-serif; background: #f5f5f5; }
@@ -65,6 +72,15 @@
         }
 
         [hidden] { display: none !important; }
+
+        /* ===== 未授權裝置的鎖定畫面 ===== */
+        .lock-screen { position: fixed; inset: 0; z-index: 2000; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); display: flex; align-items: center; justify-content: center; padding: 20px; overflow-y: auto; }
+        .lock-card { background: white; border-radius: 12px; padding: 28px 24px; width: 100%; max-width: 400px; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,0.25); }
+        .lock-card h2 { margin: 8px 0; }
+        .lock-card p { color: #666; font-size: 14px; line-height: 1.6; margin-bottom: 18px; }
+        .lock-form { display: flex; flex-direction: column; gap: 10px; text-align: left; }
+        .lock-form input, .lock-form select { padding: 12px; font-size: 15px; }
+        .lock-form label { margin-bottom: -4px; }
 
         /* ===== 漢堡選單側邊面板 ===== */
         .menu-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 1000; }
@@ -191,6 +207,30 @@
         </div>
     </div>
 
+    <!-- 未登記的裝置：鎖住整個前台，只能由店長登記 -->
+    <div id="lockScreen" class="lock-screen" hidden>
+        <div class="lock-card">
+            <div style="font-size: 48px;">🔒</div>
+            <h2>此裝置未授權</h2>
+            <p>這台裝置還沒有登記為門市裝置，<br>不能使用收銀台、打卡和結帳紀錄。<br>請店長在下面登記這台裝置。</p>
+            <div class="lock-form">
+                <label>裝置名稱</label>
+                <input type="text" id="regName" placeholder="例：高雄櫃台平板" maxlength="30">
+                <label>門市</label>
+                <select id="regStore">
+                    <option value="高雄">高雄門市</option>
+                    <option value="台中">台中門市</option>
+                </select>
+                <label>後台帳號</label>
+                <input type="text" id="regUser" value="admin" autocomplete="username">
+                <label>後台密碼</label>
+                <input type="password" id="regPass" autocomplete="current-password">
+                <button class="checkout-btn" id="regBtn" onclick="registerDevice()">📍 登記這台裝置</button>
+                <div id="regMessage"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- 漢堡選單：人員打卡 / 結帳紀錄 -->
     <div id="menuOverlay" class="menu-overlay" hidden onclick="if (event.target === this) closeMenu()">
         <div class="menu-drawer">
@@ -254,6 +294,90 @@
 
     <script>
         const API_URL = () => document.getElementById('apiUrl').value.trim().replace(/\/$/, '') || window.location.origin;
+
+        // ---- 門市裝置：只有登記過的裝置能使用前台（收銀、打卡、結帳紀錄）----
+        const DEVICE_KEY = 'pos_punch_device';
+        const getDeviceToken = () => { try { return localStorage.getItem(DEVICE_KEY); } catch (e) { return null; } };
+        let punchDevice = null;   // 這台裝置的登記資料 { name, store }
+
+        // 所有呼叫後端的地方都帶上裝置代碼；裝置被停用時跳回鎖定畫面
+        async function posFetch(path, options = {}) {
+            const headers = { ...(options.headers || {}), 'X-Device-Token': getDeviceToken() || '' };
+            const res = await fetch(`${API_URL()}${path}`, { ...options, headers });
+            if (res.status === 403) {
+                const data = await res.clone().json().catch(() => ({}));
+                if (data.code === 'DEVICE_NOT_AUTHORIZED') showLockScreen();
+            }
+            return res;
+        }
+
+        function showLockScreen() {
+            punchDevice = null;
+            document.getElementById('regMessage').className = '';
+            document.getElementById('regMessage').textContent = '';
+            document.getElementById('lockScreen').hidden = false;
+        }
+
+        // 開啟頁面時先確認這台裝置，通過才載入商品和人員
+        async function initDevice() {
+            const token = getDeviceToken();
+            punchDevice = null;
+            if (token) {
+                try {
+                    const res = await fetch(`${API_URL()}/api/punch-device?token=${encodeURIComponent(token)}`);
+                    if (res.ok) punchDevice = (await res.json()).data;
+                } catch (e) { /* 網路錯誤 */ }
+            }
+            if (!punchDevice) return showLockScreen();
+
+            document.getElementById('lockScreen').hidden = true;
+            // 門市固定為裝置登記的門市
+            ['store', 'menuStore'].forEach(id => {
+                const select = document.getElementById(id);
+                select.value = punchDevice.store;
+                select.disabled = true;
+            });
+            loadProducts();
+            loadStaff();
+        }
+
+        // 店長在鎖定畫面輸入後台帳密，登記這台裝置
+        async function registerDevice() {
+            const msg = document.getElementById('regMessage');
+            const name = document.getElementById('regName').value.trim();
+            const store = document.getElementById('regStore').value;
+            const user = document.getElementById('regUser').value.trim();
+            const pass = document.getElementById('regPass').value;
+            const fail = (text) => { msg.className = 'message error'; msg.textContent = text; };
+            if (!name) return fail('請填裝置名稱，例如：高雄櫃台平板');
+            if (!user || !pass) return fail('請輸入後台帳號和密碼');
+
+            const btn = document.getElementById('regBtn');
+            btn.disabled = true;
+            try {
+                const basic = btoa(String.fromCharCode(...new TextEncoder().encode(`${user}:${pass}`)));
+                const res = await fetch(`${API_URL()}/api/admin/devices`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${basic}`, 'X-No-Auth-Prompt': '1' },
+                    body: JSON.stringify({ name, store })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.message || res.status);
+                try { localStorage.setItem(DEVICE_KEY, data.data.token); } catch (e) {
+                    throw new Error('這個瀏覽器無法儲存設定（可能是無痕模式），請用一般模式開啟');
+                }
+                document.getElementById('regPass').value = '';
+                msg.className = 'message success';
+                msg.textContent = `✓ 已登記為 ${store}門市 裝置`;
+                await initDevice();
+            } catch (error) {
+                fail('登記失敗：' + error.message);
+            } finally {
+                document.getElementById('regPass').value = '';
+                btn.disabled = false;
+            }
+        }
+
         let cart = {};
         let currentSeries = null;
 
@@ -264,7 +388,7 @@
         async function loadProducts() {
             const seriesView = document.getElementById('seriesView');
             try {
-                const res = await fetch(`${API_URL()}/api/inventory`);
+                const res = await posFetch(`/api/inventory`);
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.message || res.status);
 
@@ -446,7 +570,7 @@
 
             try {
                 for (const [productId, item] of Object.entries(cart)) {
-                    const res = await fetch(`${API_URL()}/api/sales/create`, {
+                    const res = await posFetch(`/api/sales/create`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
@@ -497,7 +621,7 @@
         const timeOf = (t) => new Date(t).toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false });
 
         async function getJson(path) {
-            const res = await fetch(`${API_URL()}${path}`);
+            const res = await posFetch(`${path}`);
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.message || res.status);
             return data.data;
@@ -526,36 +650,18 @@
             document.getElementById('ordersPanel').hidden = tab !== 'orders';
             document.getElementById('punchMessage').className = '';
             document.getElementById('punchMessage').textContent = '';
-            document.getElementById('menuStore').disabled = false;
             if (tab === 'punch') checkDevice().then(loadPunches);
             else if (tab === 'orders') loadOrders();
         }
 
-        // ---- 門市打卡裝置（在後台「打卡設定」登記過的裝置才能打卡）----
-        const DEVICE_KEY = 'pos_punch_device';
-        const getDeviceToken = () => { try { return localStorage.getItem(DEVICE_KEY); } catch (e) { return null; } };
-        let punchDevice = null;
-
+        // 打卡畫面上方顯示這台裝置
         async function checkDevice() {
             const box = document.getElementById('deviceStatus');
-            const token = getDeviceToken();
-            punchDevice = null;
-            if (token) {
-                try { punchDevice = await getJson(`/api/punch-device?token=${encodeURIComponent(token)}`); } catch (e) { /* 未登記或已停用 */ }
-            }
             box.className = 'device-status ' + (punchDevice ? 'ok' : 'bad');
             box.innerHTML = punchDevice
-                ? `📍 ${esc(punchDevice.store)}門市打卡裝置（${esc(punchDevice.name)}）`
-                : '⚠️ 這台裝置不能打卡。請店長在這台裝置登入後台 →「🔐 打卡設定」設為門市打卡裝置。';
+                ? `📍 ${esc(punchDevice.store)}門市裝置（${esc(punchDevice.name)}）`
+                : '⚠️ 這台裝置未授權，不能打卡。';
             document.querySelectorAll('.punch-btn').forEach(b => b.disabled = !punchDevice);
-
-            // 打卡門市固定為裝置所屬門市
-            const storeSelect = document.getElementById('menuStore');
-            if (punchDevice && menuTab === 'punch') {
-                storeSelect.value = punchDevice.store;
-                document.getElementById('store').value = punchDevice.store;
-            }
-            storeSelect.disabled = !!punchDevice && menuTab === 'punch';
         }
 
         // 員工名單從後台讀取（後台「打卡設定」管理）
@@ -604,7 +710,7 @@
 
             document.querySelectorAll('.punch-btn').forEach(b => b.disabled = true);
             try {
-                const res = await fetch(`${API_URL()}/api/attendance/punch`, {
+                const res = await posFetch(`/api/attendance/punch`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -680,9 +786,8 @@
             }
         }
 
-        // 初始化：載入商品、員工名單
-        loadProducts();
-        loadStaff();
+        // 初始化：先確認裝置，通過後才載入商品、員工名單
+        initDevice();
         renderCart();
     </script>
 </body>

@@ -91,7 +91,7 @@ async function initDb() {
       pin_hash   TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
-    -- 門市打卡裝置（只有登記過的裝置可以打卡）
+    -- 門市裝置（只有登記過的裝置可以使用前台與打卡）
     CREATE TABLE IF NOT EXISTS punch_devices (
       id         SERIAL PRIMARY KEY,
       token      TEXT NOT NULL UNIQUE,
@@ -132,34 +132,61 @@ app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
 // ============ 後台密碼（瀏覽器會跳出帳號密碼視窗） ============
+function isAdmin(req) {
+  if (!ADMIN_PASSWORD) return false;
+  const [type, encoded] = (req.headers.authorization || '').split(' ');
+  if (type !== 'Basic' || !encoded) return false;
+  const [user, ...rest] = Buffer.from(encoded, 'base64').toString().split(':');
+  return user === ADMIN_USER && rest.join(':') === ADMIN_PASSWORD;
+}
+
 function requireAdmin(req, res, next) {
   if (!ADMIN_PASSWORD) {
     return res.status(503).send('尚未設定 ADMIN_PASSWORD，請到 Railway Variables 設定');
   }
-  const [type, encoded] = (req.headers.authorization || '').split(' ');
-  if (type === 'Basic' && encoded) {
-    const [user, ...rest] = Buffer.from(encoded, 'base64').toString().split(':');
-    if (user === ADMIN_USER && rest.join(':') === ADMIN_PASSWORD) return next();
+  if (isAdmin(req)) return next();
+  // 前台「登記裝置」表單自己輸入帳密，不要跳出瀏覽器的登入視窗
+  if (!req.get('X-No-Auth-Prompt')) res.set('WWW-Authenticate', 'Basic realm="POS Admin", charset="UTF-8"');
+  res.status(401).json({ status: 'error', message: '後台帳號或密碼錯誤' });
+}
+
+// 前台功能只限登記過的門市裝置（或已登入後台的管理者）
+async function requireDevice(req, res, next) {
+  const device = await findDevice(req.get('X-Device-Token'));
+  if (device) {
+    req.device = device;
+    return next();
   }
-  res.set('WWW-Authenticate', 'Basic realm="POS Admin", charset="UTF-8"');
-  res.status(401).json({ status: 'error', message: '需要登入後台' });
+  if (isAdmin(req)) {
+    req.device = null;
+    return next();
+  }
+  res.status(403).json({ status: 'error', code: 'DEVICE_NOT_AUTHORIZED', message: '此裝置未授權，請店長登記這台裝置' });
 }
 
 // ============ 頁面 ============
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'pos-checkout.html')));
 app.get('/admin', requireAdmin, (req, res) => res.sendFile(path.join(__dirname, 'pos-admin.html')));
 
+// App 設定檔與圖示（加到主畫面用）
+app.get(/^\/(manifest-(pos|admin)\.webmanifest|icon-(pos|admin)-(180|192|512)\.png)$/, (req, res) => {
+  if (req.path.endsWith('.webmanifest')) res.type('application/manifest+json');
+  res.sendFile(path.join(__dirname, req.path.slice(1)));
+});
+
 // ============ API 端點 ============
 
 // 1. 獲得庫存
-app.get('/api/inventory', async (req, res) => {
+app.get('/api/inventory', requireDevice, async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM products ORDER BY id');
   res.json({ status: 'success', data: rows });
 });
 
 // 2. 銷售（結帳）
-app.post('/api/sales/create', async (req, res) => {
-  const { product_id, quantity, store, staff, customer_name, order_no } = req.body || {};
+app.post('/api/sales/create', requireDevice, async (req, res) => {
+  const { product_id, quantity, staff, customer_name, order_no } = req.body || {};
+  // 門市以裝置登記的為準
+  const store = req.device ? req.device.store : req.body?.store;
   const qty = parseInt(quantity, 10);
   const storeKey = STORE_KEYS[store];
 
@@ -221,11 +248,12 @@ function toRecord(r) {
 const TODAY_SQL = `(created_at AT TIME ZONE 'Asia/Taipei')::date = (NOW() AT TIME ZONE 'Asia/Taipei')::date`;
 
 // 前台：今日結帳紀錄（只限今天、指定門市）
-app.get('/api/pos/sales/today', async (req, res) => {
-  if (!STORE_KEYS[req.query.store]) return res.status(400).json({ status: 'error', message: '門市錯誤' });
+app.get('/api/pos/sales/today', requireDevice, async (req, res) => {
+  const store = req.device ? req.device.store : req.query.store;
+  if (!STORE_KEYS[store]) return res.status(400).json({ status: 'error', message: '門市錯誤' });
   const { rows } = await pool.query(
     `SELECT * FROM sales WHERE ${TODAY_SQL} AND store = $1 ORDER BY created_at DESC LIMIT 500`,
-    [req.query.store]);
+    [store]);
   res.json({ status: 'success', data: rows.map(toRecord) });
 });
 
@@ -256,7 +284,7 @@ const MAX_PIN_FAILURES = 5;
 const LOCK_MS = 5 * 60 * 1000;
 
 // 前台：員工名單（只有名字）
-app.get('/api/staff', async (req, res) => {
+app.get('/api/staff', requireDevice, async (req, res) => {
   const { rows } = await pool.query('SELECT name FROM staff ORDER BY created_at, name');
   res.json({ status: 'success', data: rows.map(r => r.name) });
 });
@@ -264,7 +292,7 @@ app.get('/api/staff', async (req, res) => {
 // 前台：檢查這台裝置能不能打卡
 app.get('/api/punch-device', async (req, res) => {
   const device = await findDevice(req.query.token);
-  if (!device) return res.status(404).json({ status: 'error', message: '這台裝置尚未設定為門市打卡裝置' });
+  if (!device) return res.status(404).json({ status: 'error', message: '這台裝置尚未登記為門市裝置' });
   res.json({ status: 'success', data: { name: device.name, store: device.store } });
 });
 
@@ -274,8 +302,8 @@ app.post('/api/attendance/punch', async (req, res) => {
   const name = String(staff || '').trim();
   if (!['in', 'out'].includes(type)) return res.status(400).json({ status: 'error', message: '打卡類型錯誤' });
 
-  const device = await findDevice(device_token);
-  if (!device) return res.status(403).json({ status: 'error', message: '這台裝置不能打卡，請店長到後台設定' });
+  const device = await findDevice(device_token || req.get('X-Device-Token'));
+  if (!device) return res.status(403).json({ status: 'error', code: 'DEVICE_NOT_AUTHORIZED', message: '這台裝置不能打卡，請店長登記這台裝置' });
 
   const { rows: [person] } = await pool.query('SELECT * FROM staff WHERE name = $1', [name]);
   if (!person) return res.status(400).json({ status: 'error', message: '請選擇人員' });
@@ -331,7 +359,7 @@ app.post('/api/admin/staff/delete', requireAdmin, async (req, res) => {
   res.json({ status: 'success', message: '已刪除員工（過去的打卡和銷售紀錄會保留）' });
 });
 
-// 後台：門市打卡裝置
+// 後台：門市裝置
 app.get('/api/admin/devices', requireAdmin, async (req, res) => {
   const { rows } = await pool.query(
     'SELECT id, name, store, created_at FROM punch_devices WHERE NOT revoked ORDER BY created_at');
@@ -347,7 +375,7 @@ app.post('/api/admin/devices', requireAdmin, async (req, res) => {
   const { rows: [device] } = await pool.query(
     'INSERT INTO punch_devices (token, name, store) VALUES ($1, $2, $3) RETURNING id, name, store, token',
     [token, name, store]);
-  res.json({ status: 'success', message: '已設定為門市打卡裝置', data: device });
+  res.json({ status: 'success', message: '已登記為門市裝置', data: device });
 });
 
 app.post('/api/admin/devices/revoke', requireAdmin, async (req, res) => {
@@ -357,11 +385,12 @@ app.post('/api/admin/devices/revoke', requireAdmin, async (req, res) => {
 });
 
 // 前台：今日打卡紀錄（指定門市）
-app.get('/api/attendance/today', async (req, res) => {
-  if (!STORE_KEYS[req.query.store]) return res.status(400).json({ status: 'error', message: '門市錯誤' });
+app.get('/api/attendance/today', requireDevice, async (req, res) => {
+  const store = req.device ? req.device.store : req.query.store;
+  if (!STORE_KEYS[store]) return res.status(400).json({ status: 'error', message: '門市錯誤' });
   const { rows } = await pool.query(
     `SELECT * FROM attendance WHERE ${TODAY_SQL} AND store = $1 ORDER BY created_at DESC`,
-    [req.query.store]);
+    [store]);
   res.json({ status: 'success', data: rows });
 });
 
@@ -383,10 +412,77 @@ function dateFilter(q) {
 
 // 3. 交易記錄
 app.get('/api/sales/records', requireAdmin, async (req, res) => {
-  const { sql, params } = dateFilter(req.query);
+  let { sql, params } = dateFilter(req.query);
+  if (req.query.staff) {
+    params = [...params, req.query.staff];
+    sql += `${sql ? ' AND' : 'WHERE'} staff = $${params.length}`;
+  }
   const { rows } = await pool.query(
     `SELECT * FROM sales ${sql} ORDER BY created_at DESC LIMIT 2000`, params);
-  res.json({ status: 'success', data: rows.map(toRecord) });
+  res.json({ status: 'success', data: rows.map(r => ({ ...toRecord(r), product_id: r.product_id })) });
+});
+
+// 修改單筆銷售（銷售人員、數量、客人）；數量改變時庫存跟著調整
+app.post('/api/admin/sales/update', requireAdmin, async (req, res) => {
+  const { id, staff, quantity, customer_name } = req.body || {};
+  const qty = quantity === undefined ? null : toInt(quantity, '數量');
+  if (qty === 0) return res.status(400).json({ status: 'error', message: '數量不能是 0，不要這筆請用刪除' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [sale] } = await client.query('SELECT * FROM sales WHERE id = $1 FOR UPDATE', [id]);
+    if (!sale) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ status: 'error', message: '找不到這筆銷售' });
+    }
+    const newQty = qty ?? sale.quantity;
+    const storeKey = STORE_KEYS[sale.store];
+    if (newQty !== sale.quantity && storeKey) {
+      // 多賣 → 扣庫存；少賣 → 加回庫存（商品已刪除就略過）
+      await client.query(
+        `UPDATE products SET ${storeKey} = ${storeKey} - $1 WHERE id = $2`, [newQty - sale.quantity, sale.product_id]);
+    }
+    const { rows: [row] } = await client.query(
+      `UPDATE sales SET quantity = $2, total = price * $2,
+              staff = COALESCE($3, staff), customer_name = COALESCE($4, customer_name)
+       WHERE id = $1 RETURNING *`,
+      [id, newQty, String(staff || '').trim() || null,
+       customer_name === undefined ? null : String(customer_name).trim() || '客人']);
+    await client.query('COMMIT');
+    res.json({ status: 'success', message: '已修改', data: toRecord(row) });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+});
+
+// 刪除銷售紀錄（ids 陣列）；賣出的數量加回庫存
+app.post('/api/admin/sales/delete', requireAdmin, async (req, res) => {
+  const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter(Number.isInteger);
+  if (!ids.length) return res.status(400).json({ status: 'error', message: '沒有要刪除的紀錄' });
+
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows } = await client.query('DELETE FROM sales WHERE id = ANY($1) RETURNING *', [ids]);
+    for (const sale of rows) {
+      const storeKey = STORE_KEYS[sale.store];
+      if (storeKey) {
+        await client.query(
+          `UPDATE products SET ${storeKey} = ${storeKey} + $1 WHERE id = $2`, [sale.quantity, sale.product_id]);
+      }
+    }
+    await client.query('COMMIT');
+    res.json({ status: 'success', message: `已刪除 ${rows.length} 筆，庫存已加回`, data: { deleted: rows.length } });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
 });
 
 // 4. 員工統計
