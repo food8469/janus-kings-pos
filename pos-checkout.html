@@ -377,6 +377,10 @@
                 <input type="password" id="regPass" autocomplete="current-password">
                 <button class="checkout-btn" id="regBtn" onclick="registerDevice()">📍 登記這台裝置</button>
                 <div id="regMessage"></div>
+                <p style="font-size: 12px; color: #999; margin: 4px 0 0; text-align: center;">
+                    已經登記過的裝置，輸入<b>相同的裝置名稱和門市</b>就會重新登入，不會重複登記。<br>
+                    請不要用無痕模式，關掉視窗後登記會消失。
+                </p>
             </div>
         </div>
     </div>
@@ -520,7 +524,7 @@
                 }
                 document.getElementById('regPass').value = '';
                 msg.className = 'message success';
-                msg.textContent = `✓ 已登記為 ${store}門市 裝置`;
+                msg.textContent = `✓ ${data.message}（${store}門市）`;
                 await initDevice();
             } catch (error) {
                 fail('登記失敗：' + error.message);
@@ -1264,6 +1268,13 @@
                 list.innerHTML = `<div class="message error">載入失敗：${esc(error.message)}</div>`;
             }
         }
+
+        // 鎖定畫面：開始打字或換選項時，清掉上一次的錯誤訊息
+        document.querySelectorAll('.lock-form input, .lock-form select').forEach(el =>
+            el.addEventListener('input', () => {
+                const msg = document.getElementById('regMessage');
+                if (msg.classList.contains('error')) { msg.className = ''; msg.textContent = ''; }
+            }));
 
         // 初始化：先確認裝置，通過後才載入商品、員工名單
         initDevice();

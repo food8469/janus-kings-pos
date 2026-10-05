@@ -541,6 +541,13 @@ app.post('/api/admin/devices', requireAdmin, async (req, res) => {
   const store = req.body?.store;
   if (!name) return res.status(400).json({ status: 'error', message: '請填裝置名稱（例：高雄櫃台平板）' });
   if (!STORE_KEYS[store]) return res.status(400).json({ status: 'error', message: '門市錯誤' });
+
+  // 同名稱、同門市已經登記過（例如清了瀏覽器資料要重新登記）→ 沿用原本那台，不重複新增
+  const { rows: [existing] } = await pool.query(
+    'SELECT id, name, store, token FROM punch_devices WHERE name = $1 AND store = $2 AND NOT revoked ORDER BY id LIMIT 1',
+    [name, store]);
+  if (existing) return res.json({ status: 'success', message: '已重新登入這台門市裝置', data: existing });
+
   const token = crypto.randomBytes(24).toString('hex');
   const { rows: [device] } = await pool.query(
     'INSERT INTO punch_devices (token, name, store) VALUES ($1, $2, $3) RETURNING id, name, store, token',
