@@ -102,6 +102,10 @@
         .pay-method:hover { border-color: #667eea; background: #f7f8ff; }
         .pay-method:active { transform: scale(0.98); }
         .pay-method:disabled { opacity: 0.5; cursor: wait; }
+        .pay-method.selected { border-color: #667eea; background: #eef1ff; box-shadow: 0 0 0 2px #667eea inset; }
+        .payment-label { font-weight: bold; color: #333; }
+        .payment-label.empty { font-weight: normal; color: #aaa; }
+        .payment-label small { font-weight: normal; color: #888; margin-left: 6px; }
         .pay-icon { font-size: 28px; }
         .pay-summary { background: white; border-radius: 8px; margin-top: 8px; }
         .pay-summary:empty { display: none; }
@@ -273,6 +277,12 @@
                     </select>
                 </div>
 
+                <!-- 付款方式（在付款視窗選好後顯示在這裡） -->
+                <div class="cart-row clickable" id="paymentRow" onclick="openPayModal()">
+                    <span><span class="row-icon">💳</span>付款方式</span>
+                    <span id="paymentLabel" class="payment-label empty">請選擇 ›</span>
+                </div>
+
                 <button class="checkout-btn big" id="checkoutBtn" onclick="checkout()">結帳　<span id="totalAmount">NT$0</span></button>
                 <div id="message"></div>
             </div>
@@ -295,11 +305,11 @@
                 <span>統一編號</span>
                 <input type="text" id="payTaxId" inputmode="numeric" maxlength="8" placeholder="選填，8 碼">
             </div>
-            <div class="list-title">付款方式（點選即完成結帳）</div>
+            <div class="list-title">付款方式（選好後回到購物車按「結帳」）</div>
             <div class="pay-methods">
-                <button class="pay-method" onclick="completeCheckout('LINE Pay')"><span class="pay-icon">💚</span>LINE Pay</button>
-                <button class="pay-method" onclick="completeCheckout('信用卡')"><span class="pay-icon">💳</span>信用卡</button>
-                <button class="pay-method" onclick="completeCheckout('現金')"><span class="pay-icon">💵</span>現金</button>
+                <button class="pay-method" data-method="LINE Pay" onclick="selectPayment('LINE Pay')"><span class="pay-icon">💚</span>LINE Pay</button>
+                <button class="pay-method" data-method="信用卡" onclick="selectPayment('信用卡')"><span class="pay-icon">💳</span>信用卡</button>
+                <button class="pay-method" data-method="現金" onclick="selectPayment('現金')"><span class="pay-icon">💵</span>現金</button>
             </div>
             <div id="payMessage"></div>
         </div>
@@ -926,21 +936,42 @@
             document.getElementById('totalAmount').textContent = `NT$${(totalAmount - off).toLocaleString()}`;
         }
 
-        // 按「結帳」→ 跳出付款視窗
+        // ---- 付款：先在付款視窗選方式 → 回到購物車按「結帳」完成 ----
+        let payment = null;   // '現金' | 'LINE Pay' | '信用卡'
+        let taxId = '';
+        const PAY_ICONS = { '現金': '💵', 'LINE Pay': '💚', '信用卡': '💳' };
+
+        function renderPayment() {
+            const label = document.getElementById('paymentLabel');
+            label.className = 'payment-label' + (payment ? '' : ' empty');
+            label.innerHTML = payment
+                ? `${PAY_ICONS[payment]} ${esc(payment)}${taxId ? `<small>統編 ${esc(taxId)}</small>` : ''} ✎`
+                : '請選擇 ›';
+        }
+
+        // 按「結帳」：還沒選付款方式 → 先跳付款視窗；選好了 → 完成結帳
         function checkout() {
             if (Object.keys(cart).length === 0) {
                 showMessage('購物車是空的', 'error');
                 return;
             }
+            if (!payment || !document.getElementById('staff').value) return openPayModal();
+            completeCheckout();
+        }
+
+        function openPayModal() {
             const subtotal = Object.values(cart).reduce((s, i) => s + i.qty * i.price, 0);
             document.getElementById('payTotal').textContent = `NT$${(subtotal - discountOf(subtotal)).toLocaleString()}`;
             const payStaff = document.getElementById('payStaff');
             payStaff.innerHTML = document.getElementById('staff').innerHTML;
             payStaff.value = document.getElementById('staff').value;
-            document.getElementById('payTaxId').value = '';
+            document.getElementById('payTaxId').value = taxId;
             document.getElementById('payMessage').className = '';
             document.getElementById('payMessage').textContent = '';
-            document.querySelectorAll('.pay-method').forEach(b => b.disabled = false);
+            document.querySelectorAll('.pay-method').forEach(b => {
+                b.disabled = false;
+                b.classList.toggle('selected', b.dataset.method === payment);
+            });
             document.getElementById('payModal').hidden = false;
         }
 
@@ -948,20 +979,36 @@
             document.getElementById('payModal').hidden = true;
         }
 
-        // 點付款方式 → 直接完成結帳
-        async function completeCheckout(paymentMethod) {
+        // 點付款方式 → 記下來，回到購物車
+        function selectPayment(method) {
             const staff = document.getElementById('payStaff').value;
-            const store = document.getElementById('store').value;
-            const taxId = document.getElementById('payTaxId').value.trim();
+            const tax = document.getElementById('payTaxId').value.trim();
             const msg = document.getElementById('payMessage');
-            const fail = (text) => { msg.className = 'message error'; msg.textContent = text; };
+            if (!staff) { msg.className = 'message error'; msg.textContent = '請選擇銷售人員'; return; }
+            if (tax && !/^\d{8}$/.test(tax)) { msg.className = 'message error'; msg.textContent = '統一編號是 8 位數字'; return; }
+            document.getElementById('staff').value = staff;
+            payment = method;
+            taxId = tax;
+            renderPayment();
+            closePayModal();
+        }
+
+        function clearPayment() {
+            payment = null;
+            taxId = '';
+            renderPayment();
+        }
+
+        // 完成結帳（付款方式已選好）
+        async function completeCheckout() {
+            const staff = document.getElementById('staff').value;
+            const store = document.getElementById('store').value;
+            const paymentMethod = payment;
+            const fail = (text) => showMessage(text, 'error');
 
             if (!staff) return fail('請選擇銷售人員');
-            if (taxId && !/^\d{8}$/.test(taxId)) return fail('統一編號是 8 位數字');
-            document.getElementById('staff').value = staff;
+            if (!paymentMethod) return openPayModal();
 
-            const buttons = document.querySelectorAll('.pay-method');
-            buttons.forEach(b => b.disabled = true);
             const btn = document.getElementById('checkoutBtn');
             btn.disabled = true;
 
@@ -1006,24 +1053,22 @@
                     if (!res.ok) {
                         const error = await res.json();
                         fail('結帳失敗: ' + error.message);
-                        buttons.forEach(b => b.disabled = false);
                         btn.disabled = false;
                         return;
                     }
                 }
 
-                const paid = document.getElementById('payTotal').textContent;
-                closePayModal();
+                const paid = document.getElementById('totalAmount').textContent;
                 showMessage(`✓ 結帳成功！${paymentMethod} 收 ${paid}`, 'success');
                 cart = {};
                 setCustomer(null);
                 clearDiscount();
+                clearPayment();
                 renderCart();
                 loadProducts(); // 更新庫存數字
                 btn.disabled = false;
             } catch (error) {
                 fail('結帳失敗: ' + error.message);
-                buttons.forEach(b => b.disabled = false);
                 btn.disabled = false;
             }
         }
