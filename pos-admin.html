@@ -45,6 +45,10 @@
         .hint { font-size: 12px; color: #999; margin-top: 10px; }
         #productForm.editing { border-color: #667eea; background: #f7f8ff; }
         [hidden] { display: none !important; }
+        button.quick-range { background: white; color: #555; border: 1px solid #ddd; padding: 6px 12px; }
+        button.quick-range:hover { border-color: #667eea; color: #667eea; }
+        tr.editing-sale td { background: #fff9db; }
+        tr.editing-sale input, tr.editing-sale select { padding: 5px; font-size: 13px; }
         button.row-btn { padding: 5px 10px; font-size: 13px; margin-right: 4px; }
         tr.detail-row > td { background: #f8f9ff; padding: 12px 15px; }
         .detail-title { font-weight: bold; color: #4c5bd4; margin-bottom: 6px; }
@@ -247,13 +251,47 @@
         <!-- 交易紀錄 -->
         <div id="sales" class="content">
             <h2>交易紀錄</h2>
-            <button onclick="loadSalesRecords()">🔄 重新整理交易記錄</button>
+
+            <!-- 日期 -->
+            <div class="filter-bar" style="align-items: center;">
+                <label>📅 <input type="date" id="salesFrom" onchange="loadSalesRecords()"></label>
+                <span>～</span>
+                <label><input type="date" id="salesTo" onchange="loadSalesRecords()"></label>
+                <button class="quick-range" onclick="setSalesRange('today')">今天</button>
+                <button class="quick-range" onclick="setSalesRange('yesterday')">昨天</button>
+                <button class="quick-range" onclick="setSalesRange('week')">本週</button>
+                <button class="quick-range" onclick="setSalesRange('month')">本月</button>
+                <button class="quick-range" onclick="setSalesRange('lastMonth')">上個月</button>
+                <button class="quick-range" onclick="setSalesRange('all')">全部</button>
+            </div>
+
+            <!-- 篩選 / 匯入匯出 -->
+            <div class="filter-bar" style="align-items: center;">
+                <select id="salesStore" onchange="renderSales()"><option value="">全部門市</option><option>高雄</option><option>台中</option></select>
+                <select id="salesStaff" onchange="renderSales()"><option value="">全部員工</option></select>
+                <select id="salesPayment" onchange="renderSales()">
+                    <option value="">全部付款方式</option><option>現金</option><option>LINE Pay</option><option>信用卡</option><option value="__none">未記錄</option>
+                </select>
+                <input type="search" id="salesSearch" placeholder="🔍 商品、顧客" oninput="renderSales()" style="width: 160px;">
+                <button onclick="loadSalesRecords()">🔄 重新整理</button>
+                <button class="secondary" onclick="exportSales()">⬇️ 匯出</button>
+                <button class="secondary" onclick="document.getElementById('salesImportFile').click()">⬆️ 匯入</button>
+                <input type="file" id="salesImportFile" accept=".xlsx,.xls,.csv" hidden onchange="previewSalesImport(this.files[0]); this.value = ''">
+            </div>
+            <div id="salesImportPreview" class="section" hidden></div>
+
+            <div id="salesSummary" class="stat-box"></div>
+            <div id="salesByPayment" class="hint" style="font-size: 14px;"></div>
+
+            <div style="overflow-x: auto;">
             <table id="salesTable">
                 <thead>
-                    <tr><th>時間</th><th>商品</th><th>數量</th><th>金額</th><th>門市</th><th>員工</th><th>付款</th></tr>
+                    <tr><th>時間</th><th>門市</th><th>員工</th><th>顧客</th><th>商品</th><th>數量</th><th>金額</th><th>付款</th><th></th></tr>
                 </thead>
                 <tbody></tbody>
             </table>
+            </div>
+            <p class="hint" id="salesNote"></p>
         </div>
 
         <!-- 員工統計 -->
@@ -452,6 +490,21 @@
             });
         }
 
+        // 讀 Excel / CSV 的第一個工作表。CSV 先用 UTF-8 解碼，看起來是亂碼就改用 Big5（台灣版 Excel 存 CSV 常用 Big5）
+        async function readSheetRows(file) {
+            await loadSheetLibrary();
+            let wb;
+            if (/\.csv$/i.test(file.name)) {
+                const bytes = await file.arrayBuffer();
+                let text = new TextDecoder('utf-8').decode(bytes);
+                if (text.includes('�')) text = new TextDecoder('big5').decode(bytes);
+                wb = XLSX.read(text.replace(/^﻿/, ''), { type: 'string' });
+            } else {
+                wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+            }
+            return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '', raw: true });
+        }
+
         // 依標題找欄位（不同系統匯出的欄位名稱不太一樣）
         const IMPORT_COLUMNS = {
             name: ['全名', '姓名', '名稱', '顧客姓名', '客戶名稱', '會員姓名', 'name'],
@@ -492,10 +545,7 @@
             box.hidden = false;
             box.innerHTML = '讀取中…';
             try {
-                await loadSheetLibrary();
-                const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
-                const sheet = wb.Sheets[wb.SheetNames[0]];
-                const raw = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: true });
+                const raw = await readSheetRows(file);
                 if (!raw.length) throw new Error('檔案裡沒有資料');
                 const headers = Object.keys(raw[0]);
                 const col = Object.fromEntries(Object.entries(IMPORT_COLUMNS).map(([k, names]) => [k, findColumn(headers, names)]));
@@ -1082,28 +1132,253 @@
         }
 
 
-        async function loadSalesRecords() {
-            try {
-                const data = await api('/api/sales/records');
-                const tbody = document.querySelector('#salesTable tbody');
-                tbody.innerHTML = '';
+        // ============ 交易紀錄：日期、篩選、編輯、匯入匯出 ============
+        let salesRows = [];
+        let salesStaffNames = [];
+        const MAX_SALES_ROWS = 500;   // 畫面最多顯示筆數（匯出不受限制）
 
-                data.data.forEach(r => {
-                    const time = new Date(r.timestamp).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false });
-                    tbody.innerHTML += `
-                        <tr>
-                            <td>${time}</td>
-                            <td>${r.product_name}</td>
-                            <td>${r.quantity}</td>
-                            <td>NT$${r.total.toLocaleString()}</td>
-                            <td>${r.store}</td>
-                            <td>${r.staff}</td>
-                            <td>${r.payment_method || ""}${r.tax_id ? `<br><small>統編 ${r.tax_id}</small>` : ""}</td>
-                        </tr>
-                    `;
-                });
+        // 台灣時間的日期字串
+        const twDate = (d) => d.toLocaleDateString('sv-SE', { timeZone: 'Asia/Taipei' });
+        const twDateTime = (t) => new Date(t).toLocaleString('sv-SE', { timeZone: 'Asia/Taipei', hour12: false });
+
+        function setSalesRange(range) {
+            const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
+            const day = (offset) => { const d = new Date(now); d.setDate(d.getDate() + offset); return d; };
+            const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+            let from = '', to = '';
+            if (range === 'today') from = to = fmt(now);
+            if (range === 'yesterday') from = to = fmt(day(-1));
+            if (range === 'week') { from = fmt(day(-((now.getDay() + 6) % 7))); to = fmt(now); }  // 週一開始
+            if (range === 'month') { from = fmt(new Date(now.getFullYear(), now.getMonth(), 1)); to = fmt(now); }
+            if (range === 'lastMonth') { from = fmt(new Date(now.getFullYear(), now.getMonth() - 1, 1)); to = fmt(new Date(now.getFullYear(), now.getMonth(), 0)); }
+            document.getElementById('salesFrom').value = from;
+            document.getElementById('salesTo').value = to;
+            loadSalesRecords();
+        }
+
+        async function loadSalesRecords() {
+            const fromInput = document.getElementById('salesFrom');
+            if (fromInput.value === '' && document.getElementById('salesTo').value === '' && !fromInput.dataset.init) {
+                fromInput.dataset.init = '1';
+                return setSalesRange('month');  // 第一次打開預設本月
+            }
+            try {
+                const q = new URLSearchParams();
+                if (fromInput.value) q.set('from', fromInput.value);
+                if (document.getElementById('salesTo').value) q.set('to', document.getElementById('salesTo').value);
+                const [records, staff] = await Promise.all([api(`/api/sales/records?${q}`), api('/api/staff').catch(() => ({ data: [] }))]);
+                salesRows = records.data;
+                salesStaffNames = [...new Set([...staff.data, ...salesRows.map(r => r.staff)])];
+                const staffSelect = document.getElementById('salesStaff');
+                const current = staffSelect.value;
+                staffSelect.innerHTML = '<option value="">全部員工</option>' + salesStaffNames.map(n => `<option>${escHtml(n)}</option>`).join('');
+                staffSelect.value = current;
+                renderSales();
             } catch (error) {
                 alert('載入交易紀錄失敗: ' + error.message);
+            }
+        }
+
+        function filteredSales() {
+            const store = document.getElementById('salesStore').value;
+            const staff = document.getElementById('salesStaff').value;
+            const pay = document.getElementById('salesPayment').value;
+            const q = document.getElementById('salesSearch').value.trim();
+            return salesRows.filter(r =>
+                (!store || r.store === store) && (!staff || r.staff === staff) &&
+                (!pay || (pay === '__none' ? !r.payment_method : r.payment_method === pay)) &&
+                (!q || r.product_name.includes(q) || (r.customer_name || '').includes(q)));
+        }
+
+        function renderSales() {
+            const list = filteredSales();
+            const sum = (k) => list.reduce((s, r) => s + (r[k] || 0), 0);
+            const orders = new Set(list.map(r => r.order_no || `#${r.id}`)).size;
+            document.getElementById('salesSummary').innerHTML = `
+                <div class="stat"><div class="stat-value">${orders}</div><div class="stat-label">結帳筆數</div></div>
+                <div class="stat"><div class="stat-value">${sum('quantity')}</div><div class="stat-label">商品件數</div></div>
+                <div class="stat"><div class="stat-value">NT$${sum('total').toLocaleString()}</div><div class="stat-label">營業額</div></div>
+                <div class="stat"><div class="stat-value">NT$${sum('discount').toLocaleString()}</div><div class="stat-label">折扣</div></div>`;
+            const byPay = {};
+            list.forEach(r => { const k = r.payment_method || '未記錄'; byPay[k] = (byPay[k] || 0) + r.total; });
+            document.getElementById('salesByPayment').textContent = Object.entries(byPay).map(([k, v]) => `${k} NT$${v.toLocaleString()}`).join('　｜　');
+
+            document.querySelector('#salesTable tbody').innerHTML = list.slice(0, MAX_SALES_ROWS).map(saleRowHtml).join('')
+                || '<tr><td colspan="9" style="color:#999">這段期間沒有交易紀錄</td></tr>';
+            document.getElementById('salesNote').textContent = list.length > MAX_SALES_ROWS
+                ? `共 ${list.length} 筆，畫面只顯示最新 ${MAX_SALES_ROWS} 筆，請縮小日期範圍；「匯出」會包含全部 ${list.length} 筆。` : '';
+        }
+
+        function saleRowHtml(r) {
+            return `
+                <tr data-sale="${r.id}">
+                    <td>${twDateTime(r.timestamp)}</td>
+                    <td>${escHtml(r.store)}</td>
+                    <td>${escHtml(r.staff)}</td>
+                    <td>${escHtml(r.customer_name || '')}</td>
+                    <td>${escHtml(r.product_name)}</td>
+                    <td>${r.quantity}</td>
+                    <td>NT$${r.total.toLocaleString()}${r.discount ? `<br><small style="color:#e03131">折 ${r.discount}</small>` : ''}</td>
+                    <td>${escHtml(r.payment_method || '')}${r.tax_id ? `<br><small>統編 ${escHtml(r.tax_id)}</small>` : ''}</td>
+                    <td style="white-space: nowrap;">
+                        <button class="row-btn" onclick="editSaleRow(${r.id})">✏️</button>
+                        <button class="row-btn danger" onclick="deleteSaleRow(${r.id})">🗑️</button>
+                    </td>
+                </tr>`;
+        }
+
+        // 這一列變成可編輯
+        function editSaleRow(id) {
+            const r = salesRows.find(s => s.id === id);
+            const tr = document.querySelector(`#salesTable tr[data-sale="${id}"]`);
+            const options = (list, cur) => list.map(v => `<option ${v === cur ? 'selected' : ''}>${escHtml(v)}</option>`).join('');
+            tr.classList.add('editing-sale');
+            tr.innerHTML = `
+                <td>${twDateTime(r.timestamp)}</td>
+                <td>${escHtml(r.store)}</td>
+                <td><select class="e-staff">${options(salesStaffNames, r.staff)}</select></td>
+                <td><input class="e-customer" value="${escHtml(r.customer_name || '')}" style="width: 90px;"></td>
+                <td>${escHtml(r.product_name)}</td>
+                <td><input class="e-qty" type="number" min="1" value="${r.quantity}" style="width: 60px;"></td>
+                <td>NT$${r.total.toLocaleString()}</td>
+                <td><select class="e-pay"><option value="">未記錄</option>${options(['現金', 'LINE Pay', '信用卡'], r.payment_method)}</select></td>
+                <td style="white-space: nowrap;">
+                    <button class="row-btn" onclick="saveSaleRow(${id})">💾</button>
+                    <button class="row-btn secondary" onclick="renderSales()">✕</button>
+                </td>`;
+        }
+
+        async function saveSaleRow(id) {
+            const tr = document.querySelector(`#salesTable tr[data-sale="${id}"]`);
+            const qty = Number(tr.querySelector('.e-qty').value);
+            if (!Number.isInteger(qty) || qty < 1) { alert('數量請填 1 以上的整數'); return; }
+            try {
+                await postJson('/api/admin/sales/update', {
+                    id, quantity: qty,
+                    staff: tr.querySelector('.e-staff').value,
+                    customer_name: tr.querySelector('.e-customer').value,
+                    payment_method: tr.querySelector('.e-pay').value || undefined
+                });
+                loadSalesRecords();
+            } catch (error) {
+                alert('保存失敗: ' + error.message);
+            }
+        }
+
+        async function deleteSaleRow(id) {
+            const r = salesRows.find(s => s.id === id);
+            if (!confirm(`確定要刪除這筆交易？\n\n${twDateTime(r.timestamp)}　${r.product_name} × ${r.quantity}　NT$${r.total.toLocaleString()}\n\n刪除後無法復原，商品會加回庫存。`)) return;
+            try {
+                await postJson('/api/admin/sales/delete', { ids: [id] });
+                loadSalesRecords();
+            } catch (error) {
+                alert('刪除失敗: ' + error.message);
+            }
+        }
+
+        // ---- 匯出（格式和匯入相同）----
+        const SALES_COLUMNS = [
+            ['id', '編號'], ['order_no', '單號'], ['time', '時間'], ['store', '門市'], ['staff', '員工'], ['customer_name', '顧客'],
+            ['product_name', '商品'], ['price', '單價'], ['quantity', '數量'], ['discount', '折扣'], ['total', '金額'],
+            ['payment_method', '付款方式'], ['tax_id', '統一編號'],
+        ];
+
+        function exportSales() {
+            const list = filteredSales();
+            if (!list.length) { alert('沒有可以匯出的紀錄'); return; }
+            const rows = [SALES_COLUMNS.map(c => c[1]), ...list.map(r => SALES_COLUMNS.map(([k]) =>
+                k === 'time' ? twDateTime(r.timestamp) : k === 'tax_id' && r.tax_id ? `'${r.tax_id}` : r[k] ?? ''))];
+            const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+            const from = document.getElementById('salesFrom').value || '全部', to = document.getElementById('salesTo').value || '全部';
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));
+            a.download = `野烏金交易紀錄_${from}_${to}.csv`;
+            a.click();
+        }
+
+        // ---- 匯入 ----
+        let salesImportRows = [];
+
+        // 時間：Excel 日期序號、Date、或「2026-10-05 17:22:52」「2026/10/5 17:22」→ 台灣時間 ISO
+        function normalizeDateTime(v) {
+            const pad = (n) => String(n).padStart(2, '0');
+            if (v instanceof Date && !isNaN(v)) return v.toISOString();
+            if (typeof v === 'number' && v > 0 && v < 100000) {
+                const d = new Date(Math.round((v - 25569) * 86400000));  // Excel 的時間是當地時間
+                return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}T${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())}+08:00`;
+            }
+            const m = String(v ?? '').trim().match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})(?:[ T]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+            return m ? `${m[1]}-${pad(m[2])}-${pad(m[3])}T${pad(m[4] || 0)}:${m[5] || '00'}:${m[6] || '00'}+08:00` : '';
+        }
+
+        async function previewSalesImport(file) {
+            if (!file) return;
+            const box = document.getElementById('salesImportPreview');
+            box.hidden = false;
+            box.innerHTML = '讀取中…';
+            try {
+                const raw = await readSheetRows(file);
+                if (!raw.length) throw new Error('檔案裡沒有資料');
+                const headers = Object.keys(raw[0]);
+                const aliases = {
+                    id: ['編號'], order_no: ['單號', '訂單編號'], time: ['時間', '日期', '交易時間', '結帳時間'],
+                    store: ['門市', '店別'], staff: ['員工', '銷售人員', '銷售員'], customer_name: ['顧客', '客人', '客戶', '顧客名稱'],
+                    product_name: ['商品', '品名', '商品名稱'], price: ['單價', '售價'], quantity: ['數量'],
+                    discount: ['折扣'], total: ['金額', '小計', '實收'], payment_method: ['付款方式', '付款'], tax_id: ['統一編號', '統編'],
+                };
+                const col = Object.fromEntries(Object.entries(aliases).map(([k, names]) => [k, findColumn(headers, names)]));
+                if (!col.product_name || !col.quantity) throw new Error('找不到「商品」或「數量」欄位');
+
+                salesImportRows = raw.map(r => {
+                    const get = (k) => col[k] ? r[col[k]] : '';
+                    const store = String(get('store')).trim();
+                    return {
+                        id: get('id'), order_no: String(get('order_no')).trim(), time: normalizeDateTime(get('time')),
+                        store: store.includes('高雄') ? '高雄' : store.includes('台中') || store.includes('臺中') ? '台中' : store,
+                        staff: String(get('staff')).trim(), customer_name: String(get('customer_name')).trim(),
+                        product_name: String(get('product_name')).trim(), price: get('price'), quantity: get('quantity'),
+                        discount: get('discount'), total: get('total'),
+                        payment_method: String(get('payment_method')).trim(), tax_id: String(get('tax_id')).replace(/\D/g, ''),
+                    };
+                }).filter(r => r.product_name);
+
+                const existing = new Set(salesRows.map(r => String(r.id)));
+                const dup = salesImportRows.filter(r => r.id && existing.has(String(r.id))).length;
+                box.innerHTML = `
+                    <h3>⬆️ 匯入預覽：${escHtml(file.name)}</h3>
+                    <p class="hint">共 <b>${salesImportRows.length}</b> 筆${dup ? `（其中至少 ${dup} 筆編號已存在，會略過）` : ''}。匯入的紀錄<b>不會扣庫存</b>。<br>
+                        讀到的欄位：${escHtml(Object.values(col).filter(Boolean).join('、'))}</p>
+                    <div style="overflow-x: auto;"><table class="detail-table">
+                        <thead><tr><th>時間</th><th>門市</th><th>員工</th><th>商品</th><th>數量</th><th>金額</th><th>付款</th></tr></thead>
+                        <tbody>${salesImportRows.slice(0, 10).map(r => `
+                            <tr><td>${r.time ? twDateTime(r.time) : '<span style="color:#e03131">（沒有時間，用匯入當下）</span>'}</td>
+                                <td>${escHtml(r.store)}</td><td>${escHtml(r.staff)}</td><td>${escHtml(r.product_name)}</td>
+                                <td>${escHtml(r.quantity)}</td><td>${escHtml(r.total)}</td><td>${escHtml(r.payment_method)}</td></tr>`).join('')}
+                        </tbody></table></div>
+                    ${salesImportRows.length > 10 ? '<p class="hint">…只顯示前 10 筆</p>' : ''}
+                    <button onclick="confirmSalesImport()">✅ 確認匯入 ${salesImportRows.length} 筆</button>
+                    <button class="secondary" onclick="cancelSalesImport()">取消</button>`;
+            } catch (error) {
+                box.innerHTML = `<span style="color:#e03131">讀取失敗：${escHtml(error.message)}</span> <button class="secondary" onclick="cancelSalesImport()">關閉</button>`;
+            }
+        }
+
+        function cancelSalesImport() {
+            salesImportRows = [];
+            document.getElementById('salesImportPreview').hidden = true;
+        }
+
+        async function confirmSalesImport() {
+            if (!salesImportRows.length) return;
+            const box = document.getElementById('salesImportPreview');
+            box.innerHTML = '匯入中，請稍候…';
+            try {
+                const result = await postJson('/api/admin/sales/import', { sales: salesImportRows });
+                alert(result.message);
+                cancelSalesImport();
+                loadSalesRecords();
+            } catch (error) {
+                box.innerHTML = `<span style="color:#e03131">匯入失敗：${escHtml(error.message)}</span> <button class="secondary" onclick="cancelSalesImport()">關閉</button>`;
             }
         }
 

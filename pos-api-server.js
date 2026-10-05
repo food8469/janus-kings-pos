@@ -155,7 +155,7 @@ class InputError extends Error {}
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '10mb' }));
 
 // ============ 後台密碼（瀏覽器會跳出帳號密碼視窗） ============
 function isAdmin(req) {
@@ -577,7 +577,11 @@ function dateFilter(q) {
   const local = `(created_at AT TIME ZONE 'Asia/Taipei')`;
   if (q.date) return { sql: `WHERE to_char(${local}, 'YYYY-MM-DD') = $1`, params: [q.date] };
   if (q.month) return { sql: `WHERE to_char(${local}, 'YYYY-MM') = $1`, params: [q.month] };
-  return { sql: '', params: [] };
+  // 日期區間：?from=YYYY-MM-DD&to=YYYY-MM-DD（可只給一邊）
+  const where = [], params = [];
+  if (cleanDate(q.from)) { params.push(q.from); where.push(`${local}::date >= $${params.length}::date`); }
+  if (cleanDate(q.to)) { params.push(q.to); where.push(`${local}::date <= $${params.length}::date`); }
+  return { sql: where.length ? `WHERE ${where.join(' AND ')}` : '', params };
 }
 
 // 3. 交易記錄
@@ -588,14 +592,66 @@ app.get('/api/sales/records', requireAdmin, async (req, res) => {
     sql += `${sql ? ' AND' : 'WHERE'} staff = $${params.length}`;
   }
   const { rows } = await pool.query(
-    `SELECT * FROM sales ${sql} ORDER BY created_at DESC LIMIT 2000`, params);
+    `SELECT * FROM sales ${sql} ORDER BY created_at DESC LIMIT 10000`, params);
   res.json({ status: 'success', data: rows.map(r => ({ ...toRecord(r), product_id: r.product_id })) });
+});
+
+// 匯入交易紀錄（例如舊系統資料）：不扣庫存；編號已存在的略過，避免重複匯入
+app.post('/api/admin/sales/import', requireAdmin, async (req, res) => {
+  const list = Array.isArray(req.body?.sales) ? req.body.sales.slice(0, 10000) : [];
+  if (!list.length) return res.status(400).json({ status: 'error', message: '沒有要匯入的資料' });
+  const { rows: products } = await pool.query('SELECT id, series, name FROM products');
+  const findProduct = (name) => products.find(p => `${p.series}-${p.name}` === name || p.name === name);
+
+  let added = 0, skipped = 0, invalid = 0;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const s of list) {
+      const id = Number.isInteger(Number(s.id)) && Number(s.id) > 0 ? Number(s.id) : null;
+      if (id) {
+        const { rows: [exists] } = await client.query('SELECT 1 FROM sales WHERE id = $1', [id]);
+        if (exists) { skipped++; continue; }
+      }
+      // 空白欄位當成「沒有」，不是 0
+      const num = (v) => (v === null || v === undefined || String(v).trim() === '' ? NaN : Number(String(v).replace(/[,$NT\s]/g, '')));
+      const name = cleanText(s.product_name, 100);
+      const qty = Math.round(num(s.quantity));
+      const discount = Math.max(0, Math.round(num(s.discount) || 0));
+      let price = Math.round(num(s.price));
+      let total = Math.round(num(s.total));
+      if (!Number.isFinite(price) && Number.isFinite(total) && qty) price = Math.round((total + discount) / qty);
+      if (!Number.isFinite(total) && Number.isFinite(price)) total = price * qty - discount;
+      if (!name || !qty || qty < 0 || !Number.isFinite(price) || !Number.isFinite(total)) { invalid++; continue; }
+
+      const time = s.time && !isNaN(new Date(s.time)) ? new Date(s.time) : new Date();
+      const product = findProduct(name);
+      await client.query(
+        `INSERT INTO sales (product_id, product_name, price, quantity, total, discount, store, staff, customer_name,
+                            order_no, payment_method, tax_id, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+        [product ? product.id : 0, name, price, qty, total, discount,
+         cleanText(s.store, 20) || '未指定', cleanText(s.staff, 30) || '未指定', cleanText(s.customer_name, 30) || '客人',
+         cleanText(s.order_no, 40), PAYMENT_METHODS.includes(s.payment_method) ? s.payment_method : cleanText(s.payment_method, 20),
+         /^\d{8}$/.test(String(s.tax_id || '')) ? String(s.tax_id) : null, time]);
+      added++;
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+  res.json({ status: 'success', message: `匯入完成：新增 ${added} 筆、已存在略過 ${skipped} 筆、資料不完整略過 ${invalid} 筆`,
+    data: { added, skipped, invalid } });
 });
 
 // 修改單筆銷售（銷售人員、數量、客人）；數量改變時庫存跟著調整
 app.post('/api/admin/sales/update', requireAdmin, async (req, res) => {
-  const { id, staff, quantity, customer_name } = req.body || {};
+  const { id, staff, quantity, customer_name, payment_method } = req.body || {};
   const qty = quantity === undefined ? null : toInt(quantity, '數量');
+  const payment = PAYMENT_METHODS.includes(payment_method) ? payment_method : null;
   if (qty === 0) return res.status(400).json({ status: 'error', message: '數量不能是 0，不要這筆請用刪除' });
 
   const client = await pool.connect();
@@ -617,10 +673,11 @@ app.post('/api/admin/sales/update', requireAdmin, async (req, res) => {
       `UPDATE sales SET quantity = $2,
               discount = LEAST(discount, price * $2),
               total = price * $2 - LEAST(discount, price * $2),
-              staff = COALESCE($3, staff), customer_name = COALESCE($4, customer_name)
+              staff = COALESCE($3, staff), customer_name = COALESCE($4, customer_name),
+              payment_method = COALESCE($5, payment_method)
        WHERE id = $1 RETURNING *`,
       [id, newQty, String(staff || '').trim() || null,
-       customer_name === undefined ? null : String(customer_name).trim() || '客人']);
+       customer_name === undefined ? null : String(customer_name).trim() || '客人', payment]);
     await client.query('COMMIT');
     res.json({ status: 'success', message: '已修改', data: toRecord(row) });
   } catch (err) {
