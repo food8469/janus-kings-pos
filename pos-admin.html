@@ -169,6 +169,8 @@
                 <select id="attendanceStaff" onchange="renderAttendance()"><option value="">全部人員</option></select>
                 <button onclick="loadAttendance()">🔄 重新整理</button>
                 <button class="secondary" onclick="togglePunchCreate()">➕ 補登打卡</button>
+                <button class="secondary" onclick="exportAttendance()">⬇️ 匯出 Excel</button>
+                <button class="secondary" onclick="printAttendance()">🖨️ 列印</button>
             </div>
 
             <div id="punchCreate" class="section" hidden>
@@ -516,19 +518,26 @@
 
         // 匯出成 Excel（.xlsx）：舊版 Excel 打開 CSV 會中文亂碼，所以直接產生 .xlsx
         async function exportXlsx(rows, fileName, sheetName) {
+            return exportXlsxSheets([{ name: sheetName, rows }], fileName);
+        }
+
+        // 多個工作表：sheets = [{ name, rows }]
+        async function exportXlsxSheets(sheets, fileName) {
             try {
                 await loadSheetLibrary();
             } catch (error) {
                 alert(error.message);
                 return;
             }
-            const ws = XLSX.utils.aoa_to_sheet(rows);
-            // 欄寬依內容長度（中文算 2 格），最寬 40
-            ws['!cols'] = rows[0].map((_, c) => ({
-                wch: Math.min(40, Math.max(...rows.map(r => [...String(r[c] ?? '')].reduce((w, ch) => w + (ch.charCodeAt(0) > 255 ? 2 : 1), 0))) + 2)
-            }));
             const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, sheetName);
+            sheets.forEach(({ name, rows }) => {
+                const ws = XLSX.utils.aoa_to_sheet(rows);
+                // 欄寬依內容長度（中文算 2 格），最寬 40
+                ws['!cols'] = rows[0].map((_, c) => ({
+                    wch: Math.min(40, Math.max(...rows.map(r => [...String(r[c] ?? '')].reduce((w, ch) => w + (ch.charCodeAt(0) > 255 ? 2 : 1), 0))) + 2)
+                }));
+                XLSX.utils.book_append_sheet(wb, ws, name);
+            });
             XLSX.writeFile(wb, fileName);
         }
 
@@ -831,6 +840,89 @@
                 <div class="stat"><div class="stat-value">${days.length}</div><div class="stat-label">出勤人次</div></div>
                 <div class="stat"><div class="stat-value">${totalHours.toFixed(1)}</div><div class="stat-label">總工時（小時）</div></div>
                 <div class="stat"><div class="stat-value">${days.filter(d => !d.in || !d.out).length}</div><div class="stat-label">漏打卡</div></div>`;
+        }
+
+        // ---- 打卡紀錄：匯出 Excel、列印 ----
+        const hm = (t) => t ? t.toLocaleTimeString('zh-TW', { timeZone: 'Asia/Taipei', hour: '2-digit', minute: '2-digit', hour12: false }) : '';
+        const dayHours = (d) => d.in && d.out && d.out > d.in ? Math.round((d.out - d.in) / 360000) / 10 : null;
+
+        // 目前篩選（月份、人員）的資料，整理成表格用的內容
+        function attendanceReport() {
+            const staff = document.getElementById('attendanceStaff').value;
+            const month = document.getElementById('attendanceMonth').value;
+            const days = attendanceDays.filter(d => !staff || d.staff === staff)
+                .sort((a, b) => a.staff.localeCompare(b.staff) || a.date.localeCompare(b.date));
+            const people = {};
+            days.forEach(d => {
+                const p = people[d.staff] || (people[d.staff] = { staff: d.staff, days: 0, hours: 0, missing: 0 });
+                p.days++;
+                p.hours += dayHours(d) || 0;
+                if (!d.in || !d.out) p.missing++;
+            });
+            return { month, staff, days, people: Object.values(people) };
+        }
+
+        function exportAttendance() {
+            const { month, staff, days, people } = attendanceReport();
+            if (!days.length) { alert('這個月沒有打卡紀錄可以匯出'); return; }
+            const summary = [['人員', '出勤天數', '總工時（小時）', '漏打卡'],
+                ...people.map(p => [p.staff, p.days, Math.round(p.hours * 10) / 10, p.missing])];
+            const daily = [['日期', '人員', '門市', '上班', '下班', '工時（小時）', '備註'],
+                ...days.map(d => [d.date, d.staff, [...d.stores].join('、'), hm(d.in) || '未打卡', hm(d.out) || '未打卡',
+                    dayHours(d) ?? '', d.notes.join('；')])];
+            const detail = [['時間', '人員', '門市', '上班/下班', '裝置', '備註'],
+                ...days.flatMap(d => d.punches).sort((a, b) => a.staff.localeCompare(b.staff) || new Date(a.created_at) - new Date(b.created_at))
+                    .map(p => [twDateTime(p.created_at), p.staff, p.store, p.type === 'in' ? '上班' : '下班', p.device_name || '', p.note || ''])];
+            exportXlsxSheets([
+                { name: '人員總計', rows: summary },
+                { name: '每日出勤', rows: daily },
+                { name: '打卡明細', rows: detail },
+            ], `野烏金打卡紀錄_${month}${staff ? '_' + staff : ''}.xlsx`);
+        }
+
+        function printAttendance() {
+            const { month, staff, days, people } = attendanceReport();
+            if (!days.length) { alert('這個月沒有打卡紀錄可以列印'); return; }
+            const [y, m] = month.split('-');
+            const title = `野烏金 打卡紀錄　${y} 年 ${Number(m)} 月${staff ? '　' + staff : ''}`;
+            const win = window.open('', '_blank');
+            if (!win) { alert('瀏覽器擋住了列印視窗，請允許這個網站開啟彈出式視窗'); return; }
+            win.document.write(`<!DOCTYPE html><html lang="zh-TW"><head><meta charset="UTF-8"><title>${escHtml(title)}</title>
+                <style>
+                    @page { size: A4; margin: 14mm; }
+                    body { font-family: 'Microsoft JhengHei', sans-serif; color: #222; font-size: 12px; }
+                    h1 { font-size: 18px; margin: 0 0 4px; }
+                    .meta { color: #666; margin-bottom: 14px; }
+                    h2 { font-size: 14px; margin: 18px 0 6px; }
+                    table { width: 100%; border-collapse: collapse; }
+                    th, td { border: 1px solid #999; padding: 5px 6px; text-align: left; }
+                    th { background: #eee; }
+                    tr { page-break-inside: avoid; }
+                    .missing { color: #c00; }
+                    .sign { margin-top: 30px; display: flex; gap: 60px; }
+                    .sign div { border-top: 1px solid #333; width: 160px; padding-top: 4px; text-align: center; }
+                    .no-print { margin-bottom: 12px; }
+                    @media print { .no-print { display: none; } }
+                </style></head><body>
+                <div class="no-print"><button onclick="window.print()">🖨️ 列印</button></div>
+                <h1>${escHtml(title)}</h1>
+                <div class="meta">列印時間：${twDateTime(new Date())}</div>
+                <h2>人員總計</h2>
+                <table><thead><tr><th>人員</th><th>出勤天數</th><th>總工時（小時）</th><th>漏打卡</th></tr></thead><tbody>
+                ${people.map(p => `<tr><td>${escHtml(p.staff)}</td><td>${p.days}</td><td>${(Math.round(p.hours * 10) / 10).toFixed(1)}</td>
+                    <td class="${p.missing ? 'missing' : ''}">${p.missing}</td></tr>`).join('')}
+                </tbody></table>
+                <h2>每日出勤</h2>
+                <table><thead><tr><th>日期</th><th>人員</th><th>門市</th><th>上班</th><th>下班</th><th>工時</th><th>備註</th></tr></thead><tbody>
+                ${days.map(d => `<tr><td>${d.date}</td><td>${escHtml(d.staff)}</td><td>${escHtml([...d.stores].join('、'))}</td>
+                    <td class="${d.in ? '' : 'missing'}">${hm(d.in) || '未打卡'}</td><td class="${d.out ? '' : 'missing'}">${hm(d.out) || '未打卡'}</td>
+                    <td>${dayHours(d) === null ? '-' : dayHours(d).toFixed(1)}</td><td>${d.notes.map(escHtml).join('<br>')}</td></tr>`).join('')}
+                </tbody></table>
+                <div class="sign"><div>員工簽名</div><div>主管簽名</div></div>
+                </body></html>`);
+            win.document.close();
+            win.focus();
+            setTimeout(() => win.print(), 300);
         }
 
         // ---- 打卡紀錄：逐筆編輯、刪除、補登 ----
