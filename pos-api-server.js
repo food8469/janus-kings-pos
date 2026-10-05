@@ -76,6 +76,9 @@ async function initDb() {
     ALTER TABLE products ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE;
     -- 大分類（試吃、一口吃、整片兩數…），原有商品預設為「一口吃」
     ALTER TABLE products ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT '一口吃';
+    -- 商品排列順序（後台可拖拉調整，前台照這個順序顯示）
+    ALTER TABLE products ADD COLUMN IF NOT EXISTS sort_order INTEGER;
+    UPDATE products SET sort_order = id WHERE sort_order IS NULL;
     -- 同一次結帳的品項共用一個單號
     ALTER TABLE sales ADD COLUMN IF NOT EXISTS order_no TEXT;
     -- 整單折扣分到這一項的金額（total 已扣掉）
@@ -204,7 +207,7 @@ app.get(/^\/(manifest-(pos|admin)\.webmanifest|icon-(pos|admin)-(180|192|512)\.p
 
 // 1. 獲得庫存
 app.get('/api/inventory', requireDevice, async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM products ORDER BY id');
+  const { rows } = await pool.query('SELECT * FROM products ORDER BY sort_order NULLS LAST, id');
   res.json({ status: 'success', data: rows });
 });
 
@@ -802,7 +805,7 @@ app.get('/api/stocktake', requireAdmin, async (req, res) => {
   const { rows } = await pool.query(
     `SELECT id, category, series || '-' || name AS name, gaoxiong, taizhong,
             gaoxiong + taizhong AS total, price
-     FROM products ORDER BY id`);
+     FROM products ORDER BY sort_order NULLS LAST, id`);
   res.json({ status: 'success', data: rows });
 });
 
@@ -834,8 +837,9 @@ app.post('/api/products/create', requireAdmin, async (req, res) => {
   if (dup) return res.status(400).json({ status: 'error', message: `「${s}-${n}」已經存在` });
 
   const { rows: [product] } = await pool.query(
-    `INSERT INTO products (id, category, series, name, price, gaoxiong, taizhong)
-     VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM products), $1, $2, $3, $4, $5, $6)
+    `INSERT INTO products (id, category, series, name, price, gaoxiong, taizhong, sort_order)
+     VALUES ((SELECT COALESCE(MAX(id), 0) + 1 FROM products), $1, $2, $3, $4, $5, $6,
+             (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM products))
      RETURNING *`,
     [c, s, n, p, toInt(gaoxiong, '高雄庫存') ?? 0, toInt(taizhong, '台中庫存') ?? 0]);
   res.json({ status: 'success', message: '商品已新增', data: product });
@@ -855,6 +859,17 @@ app.post('/api/products/update', requireAdmin, async (req, res) => {
      typeof active === 'boolean' ? active : null, text(category)]);
   if (!product) return res.status(404).json({ status: 'error', message: '商品不存在' });
   res.json({ status: 'success', message: '商品已更新', data: product });
+});
+
+// 11. 調整商品順序：ids 依新的順序排列（後台拖拉或 ▲▼）
+app.post('/api/admin/products/reorder', requireAdmin, async (req, res) => {
+  const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter(Number.isInteger);
+  if (!ids.length) return res.status(400).json({ status: 'error', message: '沒有要排序的商品' });
+  await pool.query(
+    `UPDATE products SET sort_order = o.ord
+     FROM unnest($1::int[]) WITH ORDINALITY AS o(id, ord)
+     WHERE products.id = o.id`, [ids]);
+  res.json({ status: 'success', message: '已更新順序' });
 });
 
 // 10. 刪除商品（銷售紀錄已存當時的品名與價格，不受影響）

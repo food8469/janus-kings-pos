@@ -45,6 +45,15 @@
         .hint { font-size: 12px; color: #999; margin-top: 10px; }
         #productForm.editing { border-color: #667eea; background: #f7f8ff; }
         [hidden] { display: none !important; }
+        .sort-col { width: 88px; }
+        .sort-cell { white-space: nowrap; }
+        .drag-handle { cursor: grab; font-size: 18px; color: #aaa; padding: 0 6px; user-select: none; vertical-align: middle; }
+        .drag-handle:hover { color: #667eea; }
+        button.move-btn { padding: 2px 6px; font-size: 11px; background: white; color: #888; border: 1px solid #ddd; margin: 0 1px; }
+        button.move-btn:hover { color: #667eea; border-color: #667eea; }
+        tr.dragging td { opacity: 0.4; }
+        tr.drop-above td { box-shadow: inset 0 3px 0 #667eea; }
+        tr.drop-below td { box-shadow: inset 0 -3px 0 #667eea; }
         button.status-toggle { padding: 5px 12px; border-radius: 14px; font-size: 13px; border: 1px solid; min-width: 86px; }
         button.status-toggle.on { background: #ebfbee; color: #2b8a3e; border-color: #8ce99a; }
         button.status-toggle.off { background: #f1f3f5; color: #868e96; border-color: #ced4da; }
@@ -262,7 +271,7 @@
 
             <table id="inventoryTable">
                 <thead>
-                    <tr><th class="check-col"><input type="checkbox" id="checkAll" title="全選" onchange="toggleChecks(visibleIds(), this.checked)"></th><th>商品</th><th>高雄</th><th>台中</th><th>合計</th><th>單價</th><th>狀態</th></tr>
+                    <tr><th class="sort-col" title="拖拉 ⠿ 或按 ▲▼ 調整順序">排序</th><th class="check-col"><input type="checkbox" id="checkAll" title="全選" onchange="toggleChecks(visibleIds(), this.checked)"></th><th>商品</th><th>高雄</th><th>台中</th><th>合計</th><th>單價</th><th>狀態</th></tr>
                 </thead>
                 <tbody></tbody>
             </table>
@@ -1035,7 +1044,11 @@
                 alert('載入庫存失敗: ' + error.message);
                 return;
             }
+            loadInventoryView();
+        }
 
+        // 用目前的 products 重畫庫存頁（不重新讀取）
+        function loadInventoryView() {
             const groups = groupByCategory(products);
 
             // 大分類、系列的輸入建議
@@ -1057,7 +1070,14 @@
             tbody.innerHTML = groups
                 .filter(g => !inventoryFilter || g.category === inventoryFilter)
                 .map(g => inventoryGroupRow(g) + g.items.map(p => `
-                    <tr class="${p.active ? '' : 'inactive'}" data-id="${p.id}">
+                    <tr class="${p.active ? '' : 'inactive'}" data-id="${p.id}"
+                        ondragover="dragOverProduct(event, ${p.id})" ondragleave="this.classList.remove('drop-above', 'drop-below')" ondrop="dropProduct(event, ${p.id})">
+                        <td class="sort-cell">
+                            <span class="drag-handle" draggable="true" title="拖拉調整順序"
+                                  ondragstart="dragStartProduct(event, ${p.id})" ondragend="dragEndProduct()">⠿</span>
+                            <button class="move-btn" title="往上移" onclick="moveProduct(${p.id}, -1)">▲</button>
+                            <button class="move-btn" title="往下移" onclick="moveProduct(${p.id}, 1)">▼</button>
+                        </td>
                         <td><input type="checkbox" class="row-check" data-id="${p.id}" onchange="toggleChecks([${p.id}], this.checked)"></td>
                         <td>${p.series}-${p.name}</td>
                         ${cell(p, 'gaoxiong')}
@@ -1236,9 +1256,75 @@
         // 庫存表的大分類標題列（多一個勾選框，可勾整個分類）
         function inventoryGroupRow(g) {
             return groupHeaderRow(g, 6).replace('<td colspan="6">',
-                `<td><input type="checkbox" class="group-check" data-category="${g.category}"
+                `<td></td><td><input type="checkbox" class="group-check" data-category="${g.category}"
                     onchange="toggleChecks(products.filter(p => p.category === this.dataset.category).map(p => p.id), this.checked)"></td>
                  <td colspan="6">`);
+        }
+
+        // ---- 調整商品順序：拖拉 ⠿（電腦）或 ▲▼（平板），只能在同一個大分類裡移動 ----
+        let draggingId = null;
+
+        async function saveProductOrder(ordered) {
+            products = ordered;
+            loadInventoryView();
+            try {
+                await postJson('/api/admin/products/reorder', { ids: ordered.map(p => p.id) });
+            } catch (error) {
+                alert('順序儲存失敗: ' + error.message);
+                loadInventory();
+            }
+        }
+
+        // 把 id 移到 targetId 的前面（before = true）或後面
+        function moveProductTo(id, targetId, before) {
+            if (id === targetId) return;
+            const list = [...products];
+            const item = list.find(p => p.id === id);
+            const target = list.find(p => p.id === targetId);
+            if (!item || !target || item.category !== target.category) return;
+            list.splice(list.indexOf(item), 1);
+            list.splice(list.indexOf(target) + (before ? 0 : 1), 0, item);
+            saveProductOrder(list);
+        }
+
+        // ▲▼：和同分類裡的上一個 / 下一個商品交換
+        function moveProduct(id, dir) {
+            const item = products.find(p => p.id === id);
+            const same = products.filter(p => p.category === item.category);
+            const neighbor = same[same.indexOf(item) + dir];
+            if (neighbor) moveProductTo(id, neighbor.id, dir < 0);
+        }
+
+        function dragStartProduct(event, id) {
+            draggingId = id;
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/plain', String(id));
+            event.target.closest('tr').classList.add('dragging');
+        }
+
+        function dragEndProduct() {
+            draggingId = null;
+            document.querySelectorAll('#inventoryTable tr').forEach(tr => tr.classList.remove('dragging', 'drop-above', 'drop-below'));
+        }
+
+        function dragOverProduct(event, targetId) {
+            const item = products.find(p => p.id === draggingId);
+            const target = products.find(p => p.id === targetId);
+            if (!item || !target || item.category !== target.category || item.id === target.id) return;
+            event.preventDefault();  // 允許放下
+            const tr = event.currentTarget;
+            const before = event.clientY < tr.getBoundingClientRect().top + tr.offsetHeight / 2;
+            tr.classList.toggle('drop-above', before);
+            tr.classList.toggle('drop-below', !before);
+        }
+
+        function dropProduct(event, targetId) {
+            event.preventDefault();
+            const tr = event.currentTarget;
+            const before = tr.classList.contains('drop-above');
+            const id = draggingId;
+            dragEndProduct();
+            if (id) moveProductTo(id, targetId, before);
         }
 
         // 表格內點「狀態」直接切換上架 / 下架
@@ -1282,7 +1368,7 @@
                 setTimeout(() => input.classList.remove('saved'), 1000);
 
                 // 更新這一列的合計和分類小計
-                const totalCell = input.closest('tr').children[4];
+                const totalCell = input.closest('tr').children[5];
                 totalCell.outerHTML = stockCell(p.gaoxiong + p.taizhong);
                 refreshGroupHeaders();
                 // 上面表單正在修改這個商品的話，同步數字
