@@ -45,6 +45,11 @@
         .hint { font-size: 12px; color: #999; margin-top: 10px; }
         #productForm.editing { border-color: #667eea; background: #f7f8ff; }
         [hidden] { display: none !important; }
+        button.status-toggle { padding: 5px 12px; border-radius: 14px; font-size: 13px; border: 1px solid; min-width: 86px; }
+        button.status-toggle.on { background: #ebfbee; color: #2b8a3e; border-color: #8ce99a; }
+        button.status-toggle.off { background: #f1f3f5; color: #868e96; border-color: #ced4da; }
+        button.status-toggle:hover { filter: brightness(0.95); }
+        tr.inactive button.status-toggle { color: #868e96; }
         button.quick-range { background: white; color: #555; border: 1px solid #ddd; padding: 6px 12px; }
         button.quick-range:hover { border-color: #667eea; color: #667eea; }
         tr.editing-sale td { background: #fff9db; }
@@ -1062,7 +1067,8 @@
                         ${cell(p, 'taizhong')}
                         ${stockCell(p.gaoxiong + p.taizhong)}
                         ${cell(p, 'price')}
-                        <td>${p.active ? '上架中' : '已下架'}</td>
+                        <td><button class="status-toggle ${p.active ? 'on' : 'off'}" onclick="toggleProductActive(${p.id}, this)"
+                            title="點一下切換上架 / 下架">${p.active ? '🟢 上架中' : '⚪ 下架中'}</button></td>
                     </tr>
                 `).join('')).join('');
 
@@ -1236,6 +1242,24 @@
                 `<td><input type="checkbox" class="group-check" data-category="${g.category}"
                     onchange="toggleChecks(products.filter(p => p.category === this.dataset.category).map(p => p.id), this.checked)"></td>
                  <td colspan="6">`);
+        }
+
+        // 表格內點「狀態」直接切換上架 / 下架
+        async function toggleProductActive(id, btn) {
+            const p = products.find(p => p.id === id);
+            if (!p) return;
+            btn.disabled = true;
+            try {
+                await postJson('/api/products/update', { product_id: id, active: !p.active });
+                p.active = !p.active;
+                btn.className = `status-toggle ${p.active ? 'on' : 'off'}`;
+                btn.textContent = p.active ? '🟢 上架中' : '⚪ 下架中';
+                btn.closest('tr').classList.toggle('inactive', !p.active);
+            } catch (error) {
+                alert('切換失敗: ' + error.message);
+            } finally {
+                btn.disabled = false;
+            }
         }
 
         // 表格內直接修改高雄／台中庫存或單價
