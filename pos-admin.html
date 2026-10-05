@@ -871,9 +871,9 @@
             if (!days.length) { alert('這個月沒有打卡紀錄可以匯出'); return; }
             const summary = [['人員', '出勤天數', '總工時（小時）', '漏打卡'],
                 ...people.map(p => [p.staff, p.days, Math.round(p.hours * 10) / 10, p.missing])];
-            const daily = [['日期', '星期', '人員', '門市', '上班時間', '下班時間', '工時（小時）', '所有打卡', '備註'],
+            const daily = [['日期', '星期', '人員', '門市', '上班時間', '下班時間', '工時（小時）', '備註'],
                 ...days.map(d => [d.date, weekday(d.date), d.staff, [...d.stores].join('、'), hm(d.in) || '未打卡', hm(d.out) || '未打卡',
-                    dayHours(d) ?? '', allPunches(d), d.notes.join('；')])];
+                    dayHours(d) ?? '', d.notes.join('；')])];
             const detail = [['日期', '打卡時間', '人員', '門市', '上班/下班', '裝置', '備註'],
                 ...days.flatMap(d => d.punches).sort((a, b) => a.staff.localeCompare(b.staff) || new Date(a.created_at) - new Date(b.created_at))
                     .map(p => { const [date, time] = twDateTime(p.created_at).split(' ');
