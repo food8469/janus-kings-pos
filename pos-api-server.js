@@ -48,6 +48,7 @@ const PRODUCTS = [
 ];
 
 const STORE_KEYS = { '高雄': 'gaoxiong', '台中': 'taizhong' };
+const PAYMENT_METHODS = ['現金', 'LINE Pay', '信用卡'];
 
 async function initDb() {
   await pool.query(`
@@ -95,6 +96,9 @@ async function initDb() {
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS legacy_spent INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS legacy_orders INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE sales ADD COLUMN IF NOT EXISTS customer_id INTEGER;
+    -- 付款方式（現金 / LINE Pay / 信用卡）與統一編號
+    ALTER TABLE sales ADD COLUMN IF NOT EXISTS payment_method TEXT;
+    ALTER TABLE sales ADD COLUMN IF NOT EXISTS tax_id TEXT;
     CREATE INDEX IF NOT EXISTS sales_customer_id_idx ON sales (customer_id);
     -- 人員打卡
     CREATE TABLE IF NOT EXISTS attendance (
@@ -242,11 +246,14 @@ app.post('/api/sales/create', requireDevice, async (req, res) => {
       `UPDATE products SET ${storeKey} = ${storeKey} - $1 WHERE id = $2`, [qty, product.id]);
 
     const { rows: [row] } = await client.query(
-      `INSERT INTO sales (product_id, product_name, price, quantity, total, store, staff, customer_name, order_no, discount, customer_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING *`,
+      `INSERT INTO sales (product_id, product_name, price, quantity, total, store, staff, customer_name, order_no, discount, customer_id,
+                          payment_method, tax_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
       [product.id, `${product.series}-${product.name}`, product.price, qty, product.price * qty - lineDiscount,
        store, staff, (customer_name || '').trim() || '客人', String(order_no || '').slice(0, 40) || null, lineDiscount,
-       toInt(req.body?.customer_id, '顧客')]
+       toInt(req.body?.customer_id, '顧客'),
+       PAYMENT_METHODS.includes(req.body?.payment_method) ? req.body.payment_method : null,
+       /^\d{8}$/.test(String(req.body?.tax_id || '')) ? String(req.body.tax_id) : null]
     );
     await client.query('COMMIT');
 
@@ -272,6 +279,8 @@ function toRecord(r) {
     customer_name: r.customer_name,
     order_no: r.order_no,
     discount: r.discount || 0,
+    payment_method: r.payment_method,
+    tax_id: r.tax_id,
   };
 }
 

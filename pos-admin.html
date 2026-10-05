@@ -250,7 +250,7 @@
             <button onclick="loadSalesRecords()">🔄 重新整理交易記錄</button>
             <table id="salesTable">
                 <thead>
-                    <tr><th>時間</th><th>商品</th><th>數量</th><th>金額</th><th>門市</th><th>員工</th></tr>
+                    <tr><th>時間</th><th>商品</th><th>數量</th><th>金額</th><th>門市</th><th>員工</th><th>付款</th></tr>
                 </thead>
                 <tbody></tbody>
             </table>
@@ -1098,6 +1098,7 @@
                             <td>NT$${r.total.toLocaleString()}</td>
                             <td>${r.store}</td>
                             <td>${r.staff}</td>
+                            <td>${r.payment_method || ""}${r.tax_id ? `<br><small>統編 ${r.tax_id}</small>` : ""}</td>
                         </tr>
                     `;
                 });
