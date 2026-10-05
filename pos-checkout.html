@@ -676,7 +676,7 @@
                         <div class="cust-item" onclick="showCustomerDetail(${c.id})">
                             <div><b>${esc(c.name || '（未填姓名）')}</b>
                                 <small>${esc(c.phone || '')}${c.phone && c.address ? '　' : ''}${esc(c.address || '')}</small></div>
-                            <small>${c.orders ? `買過 ${c.orders} 次` : '尚無紀錄'}</small>
+                            <small>${c.orders + (c.legacy_orders || 0) ? `買過 ${c.orders + (c.legacy_orders || 0)} 次` : '尚無紀錄'}</small>
                         </div>`).join('')
                         : `<div class="empty">${q ? '找不到這位顧客，可以按下面「新增顧客」' : '還沒有建檔的顧客'}</div>`;
                 } catch (error) {
@@ -698,7 +698,9 @@
                 info.innerHTML = `
                     <div>👤 ${esc(c.name || '（未填姓名）')}</div>
                     <div>📞 ${esc(c.phone || '（未填電話）')}</div>
-                    <div>🏠 ${esc(c.address || '（未填地址）')}</div>`;
+                    <div>🏠 ${esc(c.address || '（未填地址）')}</div>
+                    ${c.birthday ? `<div>🎂 ${esc(c.birthday)}</div>` : ''}
+                    ${c.note ? `<div>📝 ${esc(c.note)}</div>` : ''}`;
 
                 // 同單號合成一張單
                 const orders = [];
@@ -709,12 +711,16 @@
                     o.total += r.total;
                     o.discount += r.discount || 0;
                 });
-                const spent = orders.reduce((s, o) => s + o.total, 0);
-                history.innerHTML = orders.length
-                    ? `<div class="day-summary" style="margin-bottom: 10px;">
-                           <div><b>${orders.length}</b><span>購買次數</span></div>
+                // 累計含舊系統匯入的紀錄（舊系統沒有明細）
+                const legacyOrders = c.legacy_orders || 0, legacySpent = c.legacy_spent || 0;
+                const spent = orders.reduce((s, o) => s + o.total, 0) + legacySpent;
+                const legacyNote = legacyOrders || legacySpent
+                    ? `<p class="hint-text" style="margin: 0 0 10px;">🗂️ 含舊系統 ${legacyOrders} 筆、NT$${legacySpent.toLocaleString()}（舊系統沒有明細）</p>` : '';
+                history.innerHTML = orders.length || legacyOrders
+                    ? `<div class="day-summary" style="margin-bottom: 6px;">
+                           <div><b>${orders.length + legacyOrders}</b><span>購買次數</span></div>
                            <div><b>NT$${spent.toLocaleString()}</b><span>累計消費</span></div>
-                       </div>` + orders.map(o => `
+                       </div>` + legacyNote + orders.map(o => `
                         <div class="order-card">
                             <div class="order-head">
                                 <span>📅 ${new Date(o.time).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', hour12: false })}</span>

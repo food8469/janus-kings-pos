@@ -103,7 +103,10 @@
                 <input type="search" id="customerSearch" placeholder="🔍 搜尋姓名、電話、地址" oninput="renderCustomers()" style="flex: 1; min-width: 200px;">
                 <button onclick="loadCustomers()">🔄 重新整理</button>
                 <button class="secondary" onclick="exportCustomers()">⬇️ 匯出 CSV</button>
+                <button onclick="document.getElementById('importFile').click()">⬆️ 匯入顧客</button>
+                <input type="file" id="importFile" accept=".xlsx,.xls,.csv" hidden onchange="previewImport(this.files[0]); this.value = ''">
             </div>
+            <div id="importPreview" class="section" hidden></div>
             <div id="customerSummary" class="stat-box"></div>
             <table id="customerTable">
                 <thead>
@@ -111,7 +114,7 @@
                 </thead>
                 <tbody></tbody>
             </table>
-            <p class="hint">顧客在前台收銀台的「👤 搜尋 / 新增顧客」建檔。刪除顧客不會刪掉過去的銷售紀錄。</p>
+            <p class="hint">顧客在前台收銀台的「👤 搜尋 / 新增顧客」建檔，也可以用「⬆️ 匯入顧客」從 Excel 匯入。購買次數和累計消費包含舊系統匯入的紀錄。刪除顧客不會刪掉過去的銷售紀錄。</p>
         </div>
 
         <!-- 打卡設定 -->
@@ -331,19 +334,23 @@
             return allCustomers.filter(c => !q || [c.name, c.phone, c.address].some(v => (v || '').toLowerCase().includes(q)));
         }
 
+        // 購買次數、累計消費 = 新系統 + 舊系統匯入
+        const custOrders = (c) => c.orders + (c.legacy_orders || 0);
+        const custSpent = (c) => c.spent + (c.legacy_spent || 0);
+
         function renderCustomers() {
             const list = filteredCustomers();
             document.getElementById('customerSummary').innerHTML = `
                 <div class="stat"><div class="stat-value">${allCustomers.length}</div><div class="stat-label">建檔顧客</div></div>
-                <div class="stat"><div class="stat-value">${allCustomers.filter(c => c.orders).length}</div><div class="stat-label">有消費紀錄</div></div>
-                <div class="stat"><div class="stat-value">NT$${allCustomers.reduce((s, c) => s + c.spent, 0).toLocaleString()}</div><div class="stat-label">顧客累計消費</div></div>`;
+                <div class="stat"><div class="stat-value">${allCustomers.filter(c => custOrders(c)).length}</div><div class="stat-label">有消費紀錄</div></div>
+                <div class="stat"><div class="stat-value">NT$${allCustomers.reduce((s, c) => s + custSpent(c), 0).toLocaleString()}</div><div class="stat-label">顧客累計消費</div></div>`;
             document.querySelector('#customerTable tbody').innerHTML = list.length ? list.map(c => `
                 <tr>
                     <td>${escHtml(c.name || '（未填）')}</td>
                     <td>${escHtml(c.phone || '')}</td>
                     <td>${escHtml(c.address || '')}</td>
-                    <td>${c.orders}</td>
-                    <td>NT$${c.spent.toLocaleString()}</td>
+                    <td>${custOrders(c)}</td>
+                    <td>NT$${custSpent(c).toLocaleString()}</td>
                     <td>${fmtDate(c.last_visit)}</td>
                     <td style="white-space: nowrap;">
                         <button class="row-btn" onclick="toggleCustomer(${c.id})">📋 紀錄 / ✏️ 編輯</button>
@@ -381,9 +388,13 @@
                         <input type="text" id="editCustName${id}" value="${escHtml(c.name || '')}" placeholder="姓名" maxlength="30">
                         <input type="tel" id="editCustPhone${id}" value="${escHtml(c.phone || '')}" placeholder="電話" maxlength="30">
                         <input type="text" id="editCustAddress${id}" value="${escHtml(c.address || '')}" placeholder="地址" maxlength="200">
+                        <input type="date" id="editCustBirthday${id}" value="${c.birthday ? String(c.birthday).slice(0, 10) : ''}" title="生日">
+                        <input type="text" id="editCustNote${id}" value="${escHtml(c.note || '')}" placeholder="備註" maxlength="500">
                         <button onclick="saveCustomerEdit(${id})">💾 保存</button>
                     </div>
-                    <div class="detail-title">📋 歷史購買紀錄（${orders.length} 次）</div>
+                    ${c.source || c.joined_at ? `<p class="hint">來源：${escHtml(c.source || '-')}　加入日期：${c.joined_at ? String(c.joined_at).slice(0, 10) : '-'}</p>` : ''}
+                    ${c.legacy_orders || c.legacy_spent ? `<p class="hint">🗂️ 舊系統紀錄：${c.legacy_orders} 筆訂單，累積 NT$${c.legacy_spent.toLocaleString()}（沒有明細）</p>` : ''}
+                    <div class="detail-title">📋 新系統購買紀錄（${orders.length} 次）</div>
                     ${orders.length ? `<table class="detail-table">
                         <thead><tr><th>時間</th><th>門市</th><th>銷售人員</th><th>商品</th><th>折扣</th><th>金額</th></tr></thead>
                         <tbody>${orders.map(o => `
@@ -403,7 +414,8 @@
 
         async function saveCustomerEdit(id) {
             const val = (p) => document.getElementById(`${p}${id}`).value.trim();
-            const body = { id, name: val('editCustName'), phone: val('editCustPhone'), address: val('editCustAddress') };
+            const body = { id, name: val('editCustName'), phone: val('editCustPhone'), address: val('editCustAddress'),
+                           birthday: val('editCustBirthday'), note: val('editCustNote') };
             if (!body.name && !body.phone && !body.address) { alert('請至少填一個欄位'); return; }
             try {
                 await postJson('/api/customers/update', body);
@@ -426,9 +438,124 @@
             }
         }
 
+        // ---- 從 Excel / CSV 匯入顧客 ----
+        let importRows = [];
+
+        async function loadSheetLibrary() {
+            if (window.XLSX) return;
+            await new Promise((resolve, reject) => {
+                const s = document.createElement('script');
+                s.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+                s.onload = resolve;
+                s.onerror = () => reject(new Error('無法載入 Excel 讀取工具，請確認網路連線'));
+                document.head.appendChild(s);
+            });
+        }
+
+        // 依標題找欄位（不同系統匯出的欄位名稱不太一樣）
+        const IMPORT_COLUMNS = {
+            name: ['全名', '姓名', '名稱', '顧客姓名', '客戶名稱', '會員姓名', 'name'],
+            phone: ['會員綁定手機號碼', '手機號碼', '手機', '電話', '聯絡電話', 'phone'],
+            address: ['地址', '收件地址', '通訊地址', 'address'],
+            birthday: ['生日', '出生日期', 'birthday'],
+            note: ['備註', 'note'],
+            source: ['加入來源', '來源'],
+            joined_at: ['加入日期', '會員註冊日期', '建立日期', '註冊日期'],
+            legacy_spent: ['累積金額', '累計消費', '消費金額', '累積消費'],
+            legacy_orders: ['訂單數', '購買次數', '消費次數'],
+        };
+
+        function findColumn(headers, names) {
+            return headers.find(h => names.includes(String(h).trim()))
+                || headers.find(h => names.some(n => String(h).includes(n)));
+        }
+
+        // 電話：Excel 常把開頭的 0 吃掉（912345678 → 0912345678）；+886 換成 0
+        function normalizePhone(v) {
+            let d = (typeof v === 'number' ? String(Math.round(v)) : String(v ?? '')).replace(/\D/g, '');
+            if (d.startsWith('886')) d = '0' + d.slice(3);
+            if (d && !d.startsWith('0') && (d.length === 9 || d.length === 8)) d = '0' + d;
+            return d;
+        }
+
+        // 日期：Excel 日期序號、Date 物件、或 2024/1/2 這類文字 → YYYY-MM-DD
+        function normalizeDate(v) {
+            if (v instanceof Date && !isNaN(v)) return v.toISOString().slice(0, 10);
+            if (typeof v === 'number' && v > 0 && v < 100000) return new Date(Math.round((v - 25569) * 86400000)).toISOString().slice(0, 10);
+            const m = String(v ?? '').trim().match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+            return m ? `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}` : '';
+        }
+
+        async function previewImport(file) {
+            if (!file) return;
+            const box = document.getElementById('importPreview');
+            box.hidden = false;
+            box.innerHTML = '讀取中…';
+            try {
+                await loadSheetLibrary();
+                const wb = XLSX.read(await file.arrayBuffer(), { type: 'array' });
+                const sheet = wb.Sheets[wb.SheetNames[0]];
+                const raw = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: true });
+                if (!raw.length) throw new Error('檔案裡沒有資料');
+                const headers = Object.keys(raw[0]);
+                const col = Object.fromEntries(Object.entries(IMPORT_COLUMNS).map(([k, names]) => [k, findColumn(headers, names)]));
+                if (!col.name && !col.phone) throw new Error('找不到「姓名」或「電話」欄位');
+
+                importRows = raw.map(r => ({
+                    name: col.name ? String(r[col.name]).trim() : '',
+                    phone: col.phone ? normalizePhone(r[col.phone]) : '',
+                    address: col.address ? String(r[col.address]).trim() : '',
+                    birthday: col.birthday ? normalizeDate(r[col.birthday]) : '',
+                    note: col.note ? String(r[col.note]).trim() : '',
+                    source: col.source ? String(r[col.source]).trim() : '',
+                    joined_at: col.joined_at ? normalizeDate(r[col.joined_at]) : '',
+                    legacy_spent: col.legacy_spent ? Number(r[col.legacy_spent]) || 0 : 0,
+                    legacy_orders: col.legacy_orders ? Number(r[col.legacy_orders]) || 0 : 0,
+                })).filter(r => r.name || r.phone || r.address);
+
+                const phones = new Set(allCustomers.map(c => c.phone).filter(Boolean));
+                const existing = importRows.filter(r => r.phone && phones.has(r.phone)).length;
+                const found = Object.entries(col).filter(([, h]) => h).map(([k, h]) => `${h}`).join('、');
+                box.innerHTML = `
+                    <h3>⬆️ 匯入預覽：${escHtml(file.name)}</h3>
+                    <p class="hint">共 <b>${importRows.length}</b> 位顧客（新增 ${importRows.length - existing} 位、已建檔 ${existing} 位會補上缺少的資料）<br>讀到的欄位：${escHtml(found)}</p>
+                    <div style="overflow-x: auto;"><table class="detail-table">
+                        <thead><tr><th>姓名</th><th>電話</th><th>生日</th><th>來源</th><th>舊系統消費</th><th>備註</th></tr></thead>
+                        <tbody>${importRows.slice(0, 10).map(r => `
+                            <tr><td>${escHtml(r.name)}</td><td>${escHtml(r.phone)}</td><td>${r.birthday}</td><td>${escHtml(r.source)}</td>
+                                <td>${r.legacy_orders} 筆 / NT$${Math.round(r.legacy_spent).toLocaleString()}</td><td>${escHtml(r.note)}</td></tr>`).join('')}
+                        </tbody></table></div>
+                    ${importRows.length > 10 ? `<p class="hint">…只顯示前 10 筆</p>` : ''}
+                    <button onclick="confirmImport()">✅ 確認匯入 ${importRows.length} 位</button>
+                    <button class="secondary" onclick="cancelImport()">取消</button>`;
+            } catch (error) {
+                box.innerHTML = `<span style="color:#e03131">讀取失敗：${escHtml(error.message)}</span> <button class="secondary" onclick="cancelImport()">關閉</button>`;
+            }
+        }
+
+        function cancelImport() {
+            importRows = [];
+            document.getElementById('importPreview').hidden = true;
+        }
+
+        async function confirmImport() {
+            if (!importRows.length) return;
+            const box = document.getElementById('importPreview');
+            box.innerHTML = '匯入中，請稍候…';
+            try {
+                const result = await postJson('/api/admin/customers/import', { customers: importRows });
+                alert(result.message);
+                cancelImport();
+                loadCustomers();
+            } catch (error) {
+                box.innerHTML = `<span style="color:#e03131">匯入失敗：${escHtml(error.message)}</span> <button class="secondary" onclick="cancelImport()">關閉</button>`;
+            }
+        }
+
         function exportCustomers() {
-            const rows = [['姓名', '電話', '地址', '購買次數', '累計消費', '最近消費', '建檔日期'],
-                ...filteredCustomers().map(c => [c.name, c.phone, c.address, c.orders, c.spent, fmtDate(c.last_visit), fmtDate(c.created_at)])];
+            const rows = [['姓名', '電話', '地址', '生日', '備註', '來源', '購買次數', '累計消費', '最近消費', '建檔日期'],
+                ...filteredCustomers().map(c => [c.name, c.phone ? `'${c.phone}` : '', c.address, c.birthday ? String(c.birthday).slice(0, 10) : '',
+                    c.note, c.source, custOrders(c), custSpent(c), fmtDate(c.last_visit), fmtDate(c.created_at)])];
             const csv = rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
             const a = document.createElement('a');
             a.href = URL.createObjectURL(new Blob(['﻿' + csv], { type: 'text/csv' }));

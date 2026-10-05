@@ -5,7 +5,10 @@ const express = require('express');
 const cors = require('cors');
 const path = require('path');
 const crypto = require('crypto');
-const { Pool } = require('pg');
+const { Pool, types } = require('pg');
+
+// DATE 欄位（生日、加入日期）直接回傳 YYYY-MM-DD 文字，避免時區差一天
+types.setTypeParser(1082, (v) => v);
 require('dotenv').config();
 
 const PORT = process.env.PORT || 3000;
@@ -84,6 +87,13 @@ async function initDb() {
       address    TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS birthday DATE;
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS note TEXT;
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS source TEXT;
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS joined_at DATE;
+    -- 從舊系統匯入的累積消費（新系統的消費另外從 sales 計算）
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS legacy_spent INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS legacy_orders INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE sales ADD COLUMN IF NOT EXISTS customer_id INTEGER;
     CREATE INDEX IF NOT EXISTS sales_customer_id_idx ON sales (customer_id);
     -- 人員打卡
@@ -307,13 +317,81 @@ app.post('/api/customers', requireDevice, async (req, res) => {
   res.json({ status: 'success', message: '已新增顧客', data: customer });
 });
 
-// 修改顧客資料
+// 日期欄位：YYYY-MM-DD 或空白
+function cleanDate(v) {
+  const s = String(v ?? '').trim();
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
+
+// 修改顧客資料（只改有送來的欄位）
 app.post('/api/customers/update', requireDevice, async (req, res) => {
+  const body = req.body || {};
+  const fields = {
+    name: () => cleanText(body.name, 30),
+    phone: () => cleanText(body.phone, 30),
+    address: () => cleanText(body.address, 200),
+    note: () => cleanText(body.note, 500),
+    birthday: () => cleanDate(body.birthday),
+  };
+  const sets = [];
+  const params = [toInt(body.id, '顧客')];
+  for (const [key, value] of Object.entries(fields)) {
+    if (body[key] === undefined) continue;
+    params.push(value());
+    sets.push(`${key} = $${params.length}`);
+  }
+  if (!sets.length) return res.status(400).json({ status: 'error', message: '沒有要修改的欄位' });
   const { rows: [customer] } = await pool.query(
-    'UPDATE customers SET name = $2, phone = $3, address = $4 WHERE id = $1 RETURNING *',
-    [toInt(req.body?.id, '顧客'), cleanText(req.body?.name, 30), cleanText(req.body?.phone, 30), cleanText(req.body?.address, 200)]);
+    `UPDATE customers SET ${sets.join(', ')} WHERE id = $1 RETURNING *`, params);
   if (!customer) return res.status(404).json({ status: 'error', message: '找不到這位顧客' });
   res.json({ status: 'success', message: '已更新顧客資料', data: customer });
+});
+
+// 後台：從 Excel 匯入顧客（電話已存在 → 只補空白欄位、更新舊系統消費；不存在 → 新增）
+app.post('/api/admin/customers/import', requireAdmin, async (req, res) => {
+  const list = Array.isArray(req.body?.customers) ? req.body.customers.slice(0, 5000) : [];
+  if (!list.length) return res.status(400).json({ status: 'error', message: '沒有要匯入的資料' });
+  let added = 0, updated = 0, skipped = 0;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const c of list) {
+      const row = {
+        name: cleanText(c.name, 30), phone: cleanText(c.phone, 30), address: cleanText(c.address, 200),
+        note: cleanText(c.note, 500), source: cleanText(c.source, 100),
+        birthday: cleanDate(c.birthday), joined_at: cleanDate(c.joined_at),
+        legacy_spent: Math.max(0, Math.round(Number(c.legacy_spent) || 0)),
+        legacy_orders: Math.max(0, Math.round(Number(c.legacy_orders) || 0)),
+      };
+      if (!row.name && !row.phone && !row.address) { skipped++; continue; }
+      const { rows: [existing] } = row.phone
+        ? await client.query('SELECT id FROM customers WHERE phone = $1 LIMIT 1', [row.phone])
+        : { rows: [] };
+      if (existing) {
+        await client.query(
+          `UPDATE customers SET
+             name = COALESCE(name, $2), address = COALESCE(address, $3), note = COALESCE(note, $4),
+             source = COALESCE(source, $5), birthday = COALESCE(birthday, $6), joined_at = COALESCE(joined_at, $7),
+             legacy_spent = $8, legacy_orders = $9
+           WHERE id = $1`,
+          [existing.id, row.name, row.address, row.note, row.source, row.birthday, row.joined_at, row.legacy_spent, row.legacy_orders]);
+        updated++;
+      } else {
+        await client.query(
+          `INSERT INTO customers (name, phone, address, note, source, birthday, joined_at, legacy_spent, legacy_orders, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($7::date::timestamptz, NOW()))`,
+          [row.name, row.phone, row.address, row.note, row.source, row.birthday, row.joined_at, row.legacy_spent, row.legacy_orders]);
+        added++;
+      }
+    }
+    await client.query('COMMIT');
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+  res.json({ status: 'success', message: `匯入完成：新增 ${added} 位、更新 ${updated} 位、略過 ${skipped} 筆空白`, data: { added, updated, skipped } });
 });
 
 // 顧客的歷史購買紀錄（含以前只打名字、沒有建檔的舊訂單）
