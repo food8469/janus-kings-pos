@@ -200,7 +200,6 @@
             <div class="header">
                 <div class="header-content">
                     <h1>🐟 野烏金 POS</h1>
-                    <p style="font-size: 12px; margin-top: 10px;">API: <input type="text" id="apiUrl" value="" style="width: 300px; padding: 5px; background: rgba(255,255,255,0.2); border: 1px solid rgba(255,255,255,0.5); color: white;" placeholder="留空 = 使用本站"></p>
                 </div>
                 <button class="menu-btn" onclick="openMenu()">☰</button>
             </div>
@@ -448,7 +447,8 @@
     </div>
 
     <script>
-        const API_URL = () => document.getElementById('apiUrl').value.trim().replace(/\/$/, '') || window.location.origin;
+        // 前台和 API 在同一個網站
+        const API_URL = () => window.location.origin;
 
         // ---- 門市裝置：只有登記過的裝置能使用前台（收銀、打卡、結帳紀錄）----
         const DEVICE_KEY = 'pos_punch_device';
