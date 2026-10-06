@@ -45,6 +45,9 @@
         .hint { font-size: 12px; color: #999; margin-top: 10px; }
         #productForm.editing { border-color: #667eea; background: #f7f8ff; }
         [hidden] { display: none !important; }
+        button.collapse-btn { background: none; color: #4c5bd4; border: none; font-size: 16px; padding: 2px 8px; }
+        button.collapse-btn:hover { background: #dde3ff; }
+        td.group-title { cursor: pointer; user-select: none; }
         .sort-col { width: 88px; }
         .sort-cell { white-space: nowrap; }
         .drag-handle { cursor: grab; font-size: 18px; color: #aaa; padding: 0 6px; user-select: none; vertical-align: middle; }
@@ -1060,7 +1063,10 @@
             if (inventoryFilter && !groups.some(g => g.category === inventoryFilter)) inventoryFilter = '';
             document.getElementById('categoryFilter').innerHTML = ['', ...groups.map(g => g.category)].map(c => `
                 <button class="${c === inventoryFilter ? 'active' : ''}" onclick="setInventoryFilter('${c}')">${c || '全部'}</button>
-            `).join('');
+            `).join('') + `
+                <span style="flex: 1"></span>
+                <button onclick="setAllCollapsed(true)">▸ 全部收合</button>
+                <button onclick="setAllCollapsed(false)">▾ 全部展開</button>`;
 
             // 填充表格：每個大分類一個標題列，附高雄／台中小計；數字可以直接點來改
             const cell = (p, field) => `<td><input type="number" class="cell-input ${p[field] < 0 ? 'negative' : ''}"
@@ -1070,7 +1076,7 @@
             tbody.innerHTML = groups
                 .filter(g => !inventoryFilter || g.category === inventoryFilter)
                 .map(g => inventoryGroupRow(g) + g.items.map(p => `
-                    <tr class="${p.active ? '' : 'inactive'}" data-id="${p.id}"
+                    <tr class="${p.active ? '' : 'inactive'}" data-id="${p.id}" data-cat="${escHtml(p.category)}" ${collapsedCategories.has(p.category) ? 'hidden' : ''}
                         ondragover="dragOverProduct(event, ${p.id})" ondragleave="this.classList.remove('drop-above', 'drop-below')" ondrop="dropProduct(event, ${p.id})">
                         <td class="sort-cell">
                             <span class="drag-handle" draggable="true" title="拖拉調整順序"
@@ -1097,8 +1103,10 @@
         // ============ 勾選 & 批次修改 ============
         let checkedIds = new Set();
 
+        // 畫面上看得到的商品（收合的分類不算），「全選」只勾這些
         function visibleIds() {
-            return [...document.querySelectorAll('#inventoryTable .row-check')].map(c => parseInt(c.dataset.id));
+            return [...document.querySelectorAll('#inventoryTable .row-check')]
+                .filter(c => !c.closest('tr').hidden).map(c => parseInt(c.dataset.id));
         }
 
         function toggleChecks(ids, on) {
@@ -1255,10 +1263,40 @@
 
         // 庫存表的大分類標題列（多一個勾選框，可勾整個分類）
         function inventoryGroupRow(g) {
+            const collapsed = collapsedCategories.has(g.category);
             return groupHeaderRow(g, 6).replace('<td colspan="6">',
-                `<td></td><td><input type="checkbox" class="group-check" data-category="${g.category}"
+                `<td><button class="collapse-btn" title="收合 / 展開" onclick="toggleCategory(this.closest('tr').dataset.category)">${collapsed ? '▸' : '▾'}</button></td>
+                 <td><input type="checkbox" class="group-check" data-category="${g.category}"
                     onchange="toggleChecks(products.filter(p => p.category === this.dataset.category).map(p => p.id), this.checked)"></td>
-                 <td colspan="6">`);
+                 <td colspan="6" class="group-title" onclick="toggleCategory(this.closest('tr').dataset.category)">`);
+        }
+
+        // ---- 大分類收合 / 展開（記在這台瀏覽器）----
+        const COLLAPSE_KEY = 'pos_collapsed_categories';
+        let collapsedCategories = new Set((() => { try { return JSON.parse(localStorage.getItem(COLLAPSE_KEY)) || []; } catch (e) { return []; } })());
+
+        function saveCollapsed() {
+            try { localStorage.setItem(COLLAPSE_KEY, JSON.stringify([...collapsedCategories])); } catch (e) { /* 無痕模式存不了就算了 */ }
+        }
+
+        function applyCollapsed() {
+            document.querySelectorAll('#inventoryTable tr[data-cat]').forEach(tr => tr.hidden = collapsedCategories.has(tr.dataset.cat));
+            document.querySelectorAll('#inventoryTable tr.group-row').forEach(tr => {
+                const btn = tr.querySelector('.collapse-btn');
+                if (btn) btn.textContent = collapsedCategories.has(tr.dataset.category) ? '▸' : '▾';
+            });
+        }
+
+        function toggleCategory(category) {
+            collapsedCategories.has(category) ? collapsedCategories.delete(category) : collapsedCategories.add(category);
+            saveCollapsed();
+            applyCollapsed();
+        }
+
+        function setAllCollapsed(collapse) {
+            collapsedCategories = new Set(collapse ? products.map(p => p.category) : []);
+            saveCollapsed();
+            applyCollapsed();
         }
 
         // ---- 調整商品順序：拖拉 ⠿（電腦）或 ▲▼（平板），只能在同一個大分類裡移動 ----
