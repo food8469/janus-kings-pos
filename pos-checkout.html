@@ -231,7 +231,12 @@
         .cart-bottom { border-top: 1px solid #eee; }
         .discount-amt { color: #e03131; font-weight: bold; }
         .discount-edit select { flex: 0 0 auto; width: 90px; }
-        .discount-presets { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 4px 2px; }
+        .discount-presets { padding: 8px 0 2px; }
+        /* 優惠一排，左右滑動 */
+        .preset-scroll { display: flex; gap: 8px; overflow-x: auto; padding: 2px 4px 6px; scroll-snap-type: x proximity;
+            -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+        .preset-scroll::-webkit-scrollbar { display: none; }
+        .preset-scroll .preset-chip { flex: 0 0 auto; white-space: nowrap; scroll-snap-align: start; }
         .preset-chip { border: 1.5px solid #ffa8a8; background: #fff5f5; color: #c92a2a; border-radius: 16px; padding: 6px 12px; font-size: 13px; font-family: inherit; cursor: pointer; text-align: left; }
         .preset-chip small { color: #999; margin-left: 4px; }
         .preset-chip.active { background: #e03131; color: white; border-color: #e03131; }
@@ -1309,12 +1314,15 @@
         function renderDiscountPresets() {
             const subtotal = subtotalOf();
             const panel = document.getElementById('discountPresets');
-            panel.innerHTML = allPresets().map(d => {
+            // 優惠排成一排，左右滑動選
+            const scrollLeft = panel.querySelector('.preset-scroll')?.scrollLeft || 0;
+            panel.innerHTML = `<div class="preset-scroll">${allPresets().map(d => {
                 const short = d.min_spend && subtotal < d.min_spend;
                 return `<button class="preset-chip ${discount && discount.id === d.id ? 'active' : ''}" ${short ? 'disabled' : ''}
                     onclick="applyPreset(${d.id})" title="${esc(d.note || '')}">
                     ${esc(d.name)}<small>${discountName(d)}${d.min_spend ? `・滿${d.min_spend.toLocaleString()}` : ''}</small></button>`;
-            }).join('');
+            }).join('')}</div>`;
+            panel.querySelector('.preset-scroll').scrollLeft = scrollLeft;
             // 「結帳時自己輸入金額」的優惠：點了之後在下面輸入要折多少
             const custom = allPresets().find(d => d.id === customPresetId);
             if (custom) {
@@ -1331,6 +1339,14 @@
         }
 
         let customPresetId = null;   // 正在輸入金額的「自己輸入」優惠
+
+        // 電腦用滑鼠滾輪也能左右捲動優惠
+        document.addEventListener('wheel', (e) => {
+            const row = e.target.closest && e.target.closest('.preset-scroll');
+            if (!row || row.scrollWidth <= row.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
+            row.scrollLeft += e.deltaY;
+            e.preventDefault();
+        }, { passive: false });
 
         function applyPreset(id) {
             const d = allPresets().find(x => x.id === id);
