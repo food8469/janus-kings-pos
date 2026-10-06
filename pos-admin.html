@@ -386,13 +386,31 @@
         <!-- 員工統計 -->
         <div id="staff" class="content">
             <h2>員工統計</h2>
-            <button onclick="loadStaffStats()">🔄 重新整理</button>
+            <div class="filter-bar" style="align-items: center;">
+                <label>📅 <input type="date" id="staffFrom" onchange="loadStaffStats()"></label>
+                <span>～</span>
+                <label><input type="date" id="staffTo" onchange="loadStaffStats()"></label>
+                <button class="quick-range" onclick="setStaffRange('today')">今天</button>
+                <button class="quick-range" onclick="setStaffRange('yesterday')">昨天</button>
+                <button class="quick-range" onclick="setStaffRange('week')">本週</button>
+                <button class="quick-range" onclick="setStaffRange('month')">本月</button>
+                <button class="quick-range" onclick="setStaffRange('lastMonth')">上個月</button>
+                <button class="quick-range" onclick="setStaffRange('all')">全部</button>
+            </div>
+            <div class="filter-bar" style="align-items: center; margin-top: 10px;">
+                <select id="staffStore" onchange="renderStaffStats()"><option value="">全部門市</option><option>高雄</option><option>台中</option></select>
+                <button onclick="loadStaffStats()">🔄 重新整理</button>
+                <button class="secondary" onclick="exportStaffStats()">⬇️ 匯出 Excel</button>
+                <button class="secondary" onclick="printStaffStats()">🖨️ 列印</button>
+            </div>
+            <div id="staffSummaryBox" class="stat-box"></div>
             <table id="staffTable">
                 <thead>
-                    <tr><th>員工名稱</th><th>銷售筆數</th><th>銷售金額</th><th>高雄筆數</th><th>台中筆數</th><th></th></tr>
+                    <tr><th>員工名稱</th><th>結帳單數</th><th>商品件數</th><th>銷售金額</th><th>折扣</th><th>高雄金額</th><th>台中金額</th><th></th></tr>
                 </thead>
                 <tbody></tbody>
             </table>
+            <p class="hint">依選擇的日期區間統計。按「✏️ 編輯」展開這位員工在這段期間的每一筆銷售，可以改銷售人員、數量、客人或刪除；刪除或減少數量會把商品加回庫存。</p>
         </div>
 
         <!-- 盤點紀錄 -->
@@ -2040,6 +2058,14 @@
         const twDateTime = (t) => new Date(t).toLocaleString('sv-SE', { timeZone: 'Asia/Taipei', hour12: false });
 
         function setSalesRange(range) {
+            const { from, to } = rangeDates(range);
+            document.getElementById('salesFrom').value = from;
+            document.getElementById('salesTo').value = to;
+            loadSalesRecords();
+        }
+
+        // 快速日期按鈕：今天、昨天、本週、本月、上個月、全部 → { from, to }
+        function rangeDates(range) {
             const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Taipei' }));
             const day = (offset) => { const d = new Date(now); d.setDate(d.getDate() + offset); return d; };
             const fmt = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -2049,9 +2075,7 @@
             if (range === 'week') { from = fmt(day(-((now.getDay() + 6) % 7))); to = fmt(now); }  // 週一開始
             if (range === 'month') { from = fmt(new Date(now.getFullYear(), now.getMonth(), 1)); to = fmt(now); }
             if (range === 'lastMonth') { from = fmt(new Date(now.getFullYear(), now.getMonth() - 1, 1)); to = fmt(new Date(now.getFullYear(), now.getMonth(), 0)); }
-            document.getElementById('salesFrom').value = from;
-            document.getElementById('salesTo').value = to;
-            loadSalesRecords();
+            return { from, to };
         }
 
         async function loadSalesRecords() {
@@ -2277,56 +2301,148 @@
             }
         }
 
+        // ---- 員工統計：依日期區間、門市統計，展開明細逐筆編輯／刪除 ----
+        let staffSales = [];          // 這段期間的銷售紀錄（每個品項一筆）
+        let staffStats = [];
+        let openStaffDetail = null;   // 重新整理後要保持展開的員工
+        let staffNames = [];
+
+        function setStaffRange(range) {
+            const { from, to } = rangeDates(range);
+            document.getElementById('staffFrom').value = from;
+            document.getElementById('staffTo').value = to;
+            loadStaffStats();
+        }
+
         async function loadStaffStats() {
+            const fromInput = document.getElementById('staffFrom');
+            if (!fromInput.value && !document.getElementById('staffTo').value && !fromInput.dataset.init) {
+                fromInput.dataset.init = '1';
+                return setStaffRange('month');   // 第一次打開預設本月
+            }
             try {
-                const data = await api('/api/staff/stats');
-                const tbody = document.querySelector('#staffTable tbody');
-                staffStats = data.data;
-                tbody.innerHTML = staffStats.map((s, i) => `
-                        <tr>
-                            <td>${escHtml(s.name)}</td>
-                            <td>${s.sales}</td>
-                            <td>NT$${s.amount.toLocaleString()}</td>
-                            <td>${s.gaoxiong}</td>
-                            <td>${s.taizhong}</td>
-                            <td style="white-space: nowrap;">
-                                <button class="row-btn" onclick="toggleStaffDetail(${i})">✏️ 編輯</button>
-                                <button class="row-btn danger" onclick="deleteStaffSales(${i})">🗑️ 刪除</button>
-                            </td>
-                        </tr>
-                        <tr class="detail-row" id="staffDetail${i}" hidden><td colspan="6"></td></tr>
-                    `).join('') || '<tr><td colspan="6" style="color:#999">還沒有銷售紀錄</td></tr>';
-                if (openStaffDetail !== null) {
-                    const i = staffStats.findIndex(s => s.name === openStaffDetail);
-                    openStaffDetail = null;
-                    if (i >= 0) toggleStaffDetail(i);
-                }
+                const q = new URLSearchParams();
+                if (fromInput.value) q.set('from', fromInput.value);
+                if (document.getElementById('staffTo').value) q.set('to', document.getElementById('staffTo').value);
+                const [sales, names] = await Promise.all([api(`/api/sales/records?${q}`), api('/api/staff').catch(() => ({ data: [] }))]);
+                staffSales = sales.data;
+                staffNames = [...new Set([...names.data, ...staffSales.map(s => s.staff)])];
+                renderStaffStats();
             } catch (error) {
                 alert('載入員工統計失敗: ' + error.message);
             }
         }
 
-        // ---- 員工統計：展開明細逐筆編輯／刪除 ----
-        let staffStats = [];
-        let openStaffDetail = null;   // 重新整理後要保持展開的員工
-        let staffNames = [];
+        const staffStoreFilter = () => document.getElementById('staffStore').value;
+        const staffSalesOf = (name) => staffSales.filter(s => s.staff === name && (!staffStoreFilter() || s.store === staffStoreFilter()));
 
-        async function toggleStaffDetail(i) {
+        function renderStaffStats() {
+            const store = staffStoreFilter();
+            const rows = staffSales.filter(s => !store || s.store === store);
+            const map = {};
+            rows.forEach(s => {
+                const m = map[s.staff] || (map[s.staff] = { name: s.staff, orders: new Set(), items: 0, amount: 0, discount: 0, gaoxiong: 0, taizhong: 0 });
+                m.orders.add(s.order_no || `#${s.id}`);
+                m.items += s.quantity;
+                m.amount += s.total;
+                m.discount += s.discount || 0;
+                if (s.store === '高雄') m.gaoxiong += s.total;
+                if (s.store === '台中') m.taizhong += s.total;
+            });
+            staffStats = Object.values(map).map(m => ({ ...m, orders: m.orders.size })).sort((a, b) => b.amount - a.amount);
+
+            const sum = (k) => staffStats.reduce((t, s) => t + s[k], 0);
+            document.getElementById('staffSummaryBox').innerHTML = `
+                <div class="stat"><div class="stat-value">${staffStats.length}</div><div class="stat-label">有銷售的員工</div></div>
+                <div class="stat"><div class="stat-value">${sum('orders')}</div><div class="stat-label">結帳單數</div></div>
+                <div class="stat"><div class="stat-value">${sum('items')}</div><div class="stat-label">商品件數</div></div>
+                <div class="stat"><div class="stat-value">${ntd(sum('amount'))}</div><div class="stat-label">銷售金額</div></div>`;
+
+            document.querySelector('#staffTable tbody').innerHTML = staffStats.map((s, i) => `
+                    <tr>
+                        <td><b>${escHtml(s.name)}</b></td>
+                        <td>${s.orders}</td>
+                        <td>${s.items}</td>
+                        <td>${ntd(s.amount)}</td>
+                        <td style="color:#e03131">${s.discount ? '-' + ntd(s.discount) : ''}</td>
+                        <td>${ntd(s.gaoxiong)}</td>
+                        <td>${ntd(s.taizhong)}</td>
+                        <td style="white-space: nowrap;">
+                            <button class="row-btn" onclick="toggleStaffDetail(${i})">✏️ 編輯</button>
+                            <button class="row-btn danger" onclick="deleteStaffSales(${i})">🗑️ 刪除</button>
+                        </td>
+                    </tr>
+                    <tr class="detail-row" id="staffDetail${i}" hidden><td colspan="8"></td></tr>
+                `).join('') || '<tr><td colspan="8" style="color:#999">這段期間沒有銷售紀錄</td></tr>';
+            if (openStaffDetail !== null) {
+                const i = staffStats.findIndex(s => s.name === openStaffDetail);
+                openStaffDetail = null;
+                if (i >= 0) toggleStaffDetail(i);
+            }
+        }
+
+        function staffRangeText() {
+            const from = document.getElementById('staffFrom').value, to = document.getElementById('staffTo').value;
+            return from || to ? `${from || '最早'} ～ ${to || '今天'}` : '全部期間';
+        }
+
+        function exportStaffStats() {
+            if (!staffStats.length) { alert('沒有可以匯出的資料'); return; }
+            const store = staffStoreFilter();
+            const detail = staffSales.filter(s => !store || s.store === store);
+            const from = document.getElementById('staffFrom').value || '全部', to = document.getElementById('staffTo').value || '全部';
+            exportXlsxSheets([
+                { name: '員工統計', rows: [['員工', '結帳單數', '商品件數', '銷售金額', '折扣', '高雄金額', '台中金額'],
+                    ...staffStats.map(s => [s.name, s.orders, s.items, s.amount, s.discount, s.gaoxiong, s.taizhong]),
+                    ['合計', ...['orders', 'items', 'amount', 'discount', 'gaoxiong', 'taizhong'].map(k => staffStats.reduce((t, s) => t + s[k], 0))]] },
+                { name: '銷售明細', rows: [['時間', '員工', '門市', '單號', '商品', '數量', '單價', '折扣', '金額', '付款方式', '客人'],
+                    ...detail.map(s => [twDateTime(s.timestamp), s.staff, s.store, s.order_no || '', s.product_name, s.quantity, s.price,
+                        s.discount || 0, s.total, s.payment_method || '', s.customer_name || ''])] }
+            ], `野烏金員工統計_${from}_${to}${store ? '_' + store : ''}.xlsx`);
+        }
+
+        function printStaffStats() {
+            if (!staffStats.length) { alert('沒有可以列印的資料'); return; }
+            const store = staffStoreFilter();
+            const title = `野烏金 員工統計　${staffRangeText()}${store ? '　' + store + '門市' : ''}`;
+            const win = window.open('', '_blank');
+            if (!win) { alert('瀏覽器擋住了列印視窗，請允許這個網站開啟彈出式視窗'); return; }
+            const total = (k) => staffStats.reduce((t, s) => t + s[k], 0);
+            win.document.write(`<!DOCTYPE html><html lang="zh-TW"><head><meta charset="UTF-8"><title>${escHtml(title)}</title>
+                <style>
+                    @page { size: A4; margin: 12mm; }
+                    body { font-family: 'Microsoft JhengHei', sans-serif; font-size: 13px; color: #222; }
+                    h1 { font-size: 17px; margin: 0 0 4px; }
+                    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+                    th, td { border: 1px solid #999; padding: 5px 7px; text-align: left; }
+                    th { background: #eee; }
+                    tfoot td { font-weight: bold; background: #f6f6f6; }
+                    .no-print { margin-bottom: 10px; }
+                    @media print { .no-print { display: none; } }
+                </style></head><body>
+                <div class="no-print"><button onclick="window.print()">🖨️ 列印</button></div>
+                <h1>${escHtml(title)}</h1>
+                <div>列印時間：${twDateTime(new Date())}</div>
+                <table><thead><tr><th>員工</th><th>結帳單數</th><th>商品件數</th><th>銷售金額</th><th>折扣</th><th>高雄金額</th><th>台中金額</th></tr></thead><tbody>
+                ${staffStats.map(s => `<tr><td>${escHtml(s.name)}</td><td>${s.orders}</td><td>${s.items}</td><td>${ntd(s.amount)}</td>
+                    <td>${s.discount ? '-' + ntd(s.discount) : ''}</td><td>${ntd(s.gaoxiong)}</td><td>${ntd(s.taizhong)}</td></tr>`).join('')}
+                </tbody><tfoot><tr><td>合計</td><td>${total('orders')}</td><td>${total('items')}</td><td>${ntd(total('amount'))}</td>
+                    <td>${total('discount') ? '-' + ntd(total('discount')) : ''}</td><td>${ntd(total('gaoxiong'))}</td><td>${ntd(total('taizhong'))}</td></tr></tfoot>
+                </table></body></html>`);
+            win.document.close();
+        }
+
+        function toggleStaffDetail(i) {
             const row = document.getElementById(`staffDetail${i}`);
             if (!row.hidden) { row.hidden = true; return; }
             const name = staffStats[i].name;
             row.hidden = false;
-            row.firstElementChild.innerHTML = '載入中…';
-            try {
-                const [sales, names] = await Promise.all([
-                    api(`/api/sales/records?staff=${encodeURIComponent(name)}`),
-                    api('/api/staff')
-                ]);
-                staffNames = [...new Set([...names.data, ...sales.data.map(s => s.staff)])];
+            {
+                const sales = { data: staffSalesOf(name) };
                 const staffOptions = (current) => staffNames.map(n =>
                     `<option ${n === current ? 'selected' : ''}>${escHtml(n)}</option>`).join('');
                 row.firstElementChild.innerHTML = `
-                    <div class="detail-title">${escHtml(name)} 的銷售明細（共 ${sales.data.length} 筆）— 改完按「保存」</div>
+                    <div class="detail-title">${escHtml(name)} 的銷售明細（${staffRangeText()}，共 ${sales.data.length} 筆）— 改完按「保存」</div>
                     <table class="detail-table">
                         <thead><tr><th>時間</th><th>門市</th><th>商品</th><th>銷售人員</th><th>數量</th><th>金額</th><th>客人</th><th></th></tr></thead>
                         <tbody>${sales.data.map(s => `
@@ -2346,8 +2462,6 @@
                         </tbody>
                     </table>
                     <p class="hint">刪除或減少數量時，商品會自動加回該門市的庫存。</p>`;
-            } catch (error) {
-                row.firstElementChild.innerHTML = `<span style="color:#e03131">載入失敗：${escHtml(error.message)}</span>`;
             }
         }
 
@@ -2385,9 +2499,10 @@
 
         async function deleteStaffSales(i) {
             const s = staffStats[i];
-            if (!confirm(`確定要刪除「${s.name}」的全部銷售紀錄？\n\n共 ${s.sales} 筆，NT$${s.amount.toLocaleString()}\n\n刪除後無法復原，商品會加回庫存。\n只想刪其中幾筆，請改按「✏️ 編輯」。`)) return;
+            const store = staffStoreFilter();
+            const sales = staffSalesOf(s.name);
+            if (!confirm(`確定要刪除「${s.name}」在 ${staffRangeText()}${store ? `（${store}門市）` : ''} 的銷售紀錄？\n\n共 ${sales.length} 筆，${ntd(s.amount)}\n\n刪除後無法復原，商品會加回庫存。\n只想刪其中幾筆，請改按「✏️ 編輯」。`)) return;
             try {
-                const sales = (await api(`/api/sales/records?staff=${encodeURIComponent(s.name)}`)).data;
                 const result = await postJson('/api/admin/sales/delete', { ids: sales.map(r => r.id) });
                 alert(result.message);
                 loadStaffStats();
