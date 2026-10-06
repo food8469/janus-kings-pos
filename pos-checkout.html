@@ -124,6 +124,9 @@
         .pay-method:hover { border-color: #667eea; background: #f7f8ff; }
         .pay-method:active { transform: scale(0.98); }
         .pay-method:disabled { opacity: 0.5; cursor: wait; }
+        .pay-title { display: flex; align-items: center; gap: 10px; }
+        .pay-reset { background: none; border: none; color: #2b8a3e; font-size: 13px; cursor: pointer; padding: 2px 6px; border-radius: 6px; font-family: inherit; }
+        .pay-reset:hover { background: #ebfbee; }
         .pay-method.selected { border-color: #667eea; background: #eef1ff; box-shadow: 0 0 0 2px #667eea inset; }
         .payment-label { font-weight: bold; color: #333; }
         .payment-label.empty { font-weight: normal; color: #aaa; }
@@ -330,7 +333,10 @@
                 <span>統一編號</span>
                 <input type="text" id="payTaxId" inputmode="numeric" maxlength="8" placeholder="選填，8 碼">
             </div>
-            <div class="list-title">付款方式（選好後回到購物車按「結帳」）</div>
+            <div class="list-title pay-title">
+                付款方式（選好後回到購物車按「結帳」）
+                <button class="pay-reset" onclick="resetPayment()" title="清掉已選的付款方式">↻ 重整</button>
+            </div>
             <div class="pay-methods">
                 <button class="pay-method" data-method="LINE Pay" onclick="selectPayment('LINE Pay')"><span class="pay-icon">💚</span>LINE Pay</button>
                 <button class="pay-method" data-method="信用卡" onclick="selectPayment('信用卡')"><span class="pay-icon">💳</span>信用卡</button>
@@ -1135,6 +1141,17 @@
             taxId = tax;
             renderPayment();
             closePayModal();
+        }
+
+        // 付款視窗的「↻ 重整」：清掉已選的付款方式和統編，視窗保持開著重新選
+        function resetPayment() {
+            clearPayment();
+            document.getElementById('payTaxId').value = '';
+            document.querySelectorAll('.pay-method').forEach(b => b.classList.remove('selected'));
+            const msg = document.getElementById('payMessage');
+            msg.className = 'message success';
+            msg.textContent = '已清除付款方式，請重新選擇';
+            setTimeout(() => { if (msg.textContent.startsWith('已清除')) { msg.className = ''; msg.textContent = ''; } }, 2000);
         }
 
         function clearPayment() {
