@@ -35,6 +35,7 @@
         .category-tabs { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 15px; }
         .category-tab { padding: 12px 24px; background: white; color: #555; border: 2px solid #ddd; border-radius: 24px; font-size: 16px; font-weight: bold; cursor: pointer; font-family: inherit; }
         .category-tab.active { background: #667eea; color: white; border-color: #667eea; }
+        .category-toggle { padding: 12px 18px; color: #667eea; font-size: 14px; }
         .product-stock { font-size: 12px; color: #2b8a3e; margin-top: 6px; }
         .product-stock.low { color: #e67700; font-weight: bold; }
         .product-stock.out { color: #e03131; font-weight: bold; }
@@ -800,8 +801,11 @@
             }
         }
 
+        let categoriesOpen = false;   // 分類按鈕展開了沒（預設收起，只顯示「全部」）
+
         function selectCategory(category) {
             currentCategory = category;
+            categoriesOpen = false;   // 選好分類就收起來
             drillCategory = null;
             document.getElementById('productSearch').value = '';   // 點分類就離開搜尋
             renderSeriesView();
@@ -878,13 +882,23 @@
             // 最前面是「全部」，預設也顯示全部
             const categories = [ALL_TAB, ...new Set(seriesData.map(s => tabOf(s.category)))];
             if (!categories.includes(currentCategory)) currentCategory = ALL_TAB;
-            categories.forEach(c => {
+            // 收起來時只顯示「全部」（和目前選的分類），按箭頭才展開其他分類
+            const shown = categoriesOpen ? categories : categories.filter(c => c === ALL_TAB || c === currentCategory);
+            shown.forEach(c => {
                 const btn = document.createElement('button');
                 btn.className = 'category-tab' + (c === currentCategory ? ' active' : '');
                 btn.textContent = c;
                 btn.onclick = () => selectCategory(c);
                 tabs.appendChild(btn);
             });
+            if (categories.length > 1) {
+                const toggle = document.createElement('button');
+                toggle.className = 'category-tab category-toggle';
+                toggle.textContent = categoriesOpen ? '▲' : '▼';
+                toggle.title = categoriesOpen ? '收起分類' : '展開分類';
+                toggle.onclick = () => { categoriesOpen = !categoriesOpen; renderSeriesView(); };
+                tabs.appendChild(toggle);
+            }
 
             // 搜尋框有字：顯示符合的品項（不分分類）
             const query = document.getElementById('productSearch').value.trim();
