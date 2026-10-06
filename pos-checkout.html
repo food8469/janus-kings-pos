@@ -720,17 +720,19 @@
         let drillCategory = null;   // 目前點進去的分類卡
 
         // 這些分類只顯示一張卡，點進去一次列出整個分類的品項（例如試吃：鹽味、紅酒…）
-        const SINGLE_TILE_CATEGORIES = ['試吃'];
+        const SINGLE_TILE_CATEGORIES = ['試吃', '手拿盒'];
 
         // 前台圖卡圖片（後台庫存管理設定）：key = 'cat:分類' 或 'series:分類|系列'
         let tileImages = {};   // { key: version }
         const tileUrl = (key) => tileImages[key]
             ? `${API_URL()}/api/tile-image?key=${encodeURIComponent(key)}&v=${tileImages[key]}` : null;
 
-        // 把一個分類的所有系列合成一個「系列」：品項名稱用口味（系列名），同一口味有多個品項時再加上品名
+        // 把一個分類的所有系列合成一個「系列」：品項名稱 =「系列 品名」，
+        // 品名跟系列或分類一樣時就省略（例：試吃的「鹽味」、手拿盒的「立體手拿盒 五珍」）
         function mergedSeries(category) {
+            const label = (s, i) => (i.name && i.name !== s.name && i.name !== category ? `${s.name} ${i.name}` : s.name);
             const items = seriesData.filter(s => s.category === category).flatMap(s =>
-                s.items.map(i => ({ ...i, name: s.items.length > 1 ? `${s.name} ${i.name}` : s.name, series: category })));
+                s.items.map(i => ({ ...i, name: label(s, i), series: category })));
             return { category, name: category, items, merged: true };
         }
         const tabOf = (category) => MERGED_TABS[category] || category;
