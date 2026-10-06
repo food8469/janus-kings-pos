@@ -92,6 +92,21 @@
         #seriesView .series-card .tile-label p { font-size: 12px; color: #999; margin-top: 4px; opacity: 1; }
         .product-img { width: 100%; height: 110px; object-fit: cover; border-radius: 6px; display: block; background: #f3f3f3; }
         .cart-thumb { width: 42px; height: 42px; object-fit: cover; border-radius: 6px; margin-right: 10px; flex: 0 0 auto; }
+        /* 頂端：搜尋商品 / 新增商品 */
+        .header h1 { margin-bottom: 0; }
+        .header-tools { display: flex; align-items: center; gap: 10px; flex: 0 1 380px; min-width: 0; }
+        .header-search { position: relative; flex: 1; min-width: 0; }
+        .header-search input { width: 100%; padding: 11px 36px 11px 14px; border: none; border-radius: 22px; font-size: 15px; font-family: inherit; background: rgba(255,255,255,0.95); color: #333; }
+        .header-search input::-webkit-search-cancel-button { display: none; }
+        .search-clear { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: #ddd; border: none; border-radius: 50%; width: 22px; height: 22px; font-size: 12px; cursor: pointer; color: #555; }
+        .header-plus { flex: 0 0 auto; width: 44px; height: 44px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.85); background: rgba(255,255,255,0.15); color: white; font-size: 26px; line-height: 1; cursor: pointer; }
+        .header-plus:hover { background: rgba(255,255,255,0.3); }
+        .header .menu-btn { padding: 0 0 0 16px; }
+        .search-result .product-cat { font-size: 11px; color: #999; }
+        @media (max-width: 600px) {
+            .header { flex-wrap: wrap; gap: 10px; }
+            .header-tools { order: 3; flex: 1 1 100%; }
+        }
         .series-heading { grid-column: 1 / -1; font-size: 15px; font-weight: bold; color: #555; padding: 6px 2px 0; border-bottom: 2px solid #eee; margin-top: 4px; }
 
         /* ===== 購物車（清單式排版）===== */
@@ -278,6 +293,13 @@
                 <div class="header-content">
                     <h1>🐟 野烏金 POS</h1>
                 </div>
+                <div class="header-tools">
+                    <div class="header-search">
+                        <input type="search" id="productSearch" placeholder="🔍 搜尋商品" autocomplete="off" oninput="renderSeriesView()">
+                        <button class="search-clear" id="searchClear" hidden onclick="clearProductSearch()" title="清除">✕</button>
+                    </div>
+                    <button class="header-plus" onclick="openNewProduct()" title="新增商品">＋</button>
+                </div>
                 <button class="menu-btn" onclick="openMenu()">☰</button>
             </div>
 
@@ -418,6 +440,35 @@
     </div>
 
     <!-- 顧客小視窗：搜尋 / 新增 / 編輯 / 歷史紀錄 -->
+    <!-- 前台新增商品（存進同一個資料庫，後台庫存管理也會出現）-->
+    <div id="newProductModal" class="modal-overlay" hidden onclick="if (event.target === this) closeNewProduct()">
+        <div class="modal-card">
+            <div class="modal-head">
+                <h3>＋ 新增商品</h3>
+                <button class="icon-btn" onclick="closeNewProduct()">✕</button>
+            </div>
+            <label>大分類</label>
+            <input type="text" id="npCategory" list="npCategoryList" maxlength="30" placeholder="例：經典一口吃（可點選現有分類）">
+            <datalist id="npCategoryList"></datalist>
+            <label>品項</label>
+            <input type="text" id="npSeries" list="npSeriesList" maxlength="50" placeholder="例：鹽味（沒填就用口味/重量）">
+            <datalist id="npSeriesList"></datalist>
+            <label>口味/重量</label>
+            <input type="text" id="npName" maxlength="50" placeholder="例：一兩">
+            <label>單價</label>
+            <input type="number" id="npPrice" min="0" inputmode="numeric" placeholder="沒填 = 0">
+            <div style="display:flex; gap:10px;">
+                <div style="flex:1"><label>高雄庫存</label><input type="number" id="npGaoxiong" min="0" inputmode="numeric" placeholder="0"></div>
+                <div style="flex:1"><label>台中庫存</label><input type="number" id="npTaizhong" min="0" inputmode="numeric" placeholder="0"></div>
+            </div>
+            <label>後台密碼（店長確認用）</label>
+            <input type="password" id="npPass" autocomplete="off" placeholder="輸入後台密碼才能新增">
+            <p class="hint-text">新增後前台、後台會同時出現；圖片、排序請到後台設定。</p>
+            <button class="checkout-btn" id="npSaveBtn" onclick="saveNewProduct()">💾 新增商品</button>
+            <div id="npMessage"></div>
+        </div>
+    </div>
+
     <div id="customerModal" class="modal-overlay" hidden onclick="if (event.target === this) closeCustomerModal()">
         <div class="modal-card">
             <div class="modal-head">
@@ -702,6 +753,7 @@
         function selectCategory(category) {
             currentCategory = category;
             drillCategory = null;
+            document.getElementById('productSearch').value = '';   // 點分類就離開搜尋
             renderSeriesView();
         }
 
@@ -784,6 +836,14 @@
                 tabs.appendChild(btn);
             });
 
+            // 搜尋框有字：顯示符合的品項（不分分類）
+            const query = document.getElementById('productSearch').value.trim();
+            document.getElementById('searchClear').hidden = !query;
+            if (query) {
+                tabs.querySelectorAll('.category-tab').forEach(b => b.classList.remove('active'));
+                return renderSearchResults(seriesView, query);
+            }
+
             const seriesTile = (series) => makeTile(tileUrl(`series:${series.category}|${series.name}`), series.name,
                 `${series.items.length} 個品項`, () => selectSeries(series));
 
@@ -852,27 +912,109 @@
             const itemsGrid = document.getElementById('itemsGrid');
             itemsGrid.innerHTML = '';
             currentSeries.items.forEach(item => {
-                const card = document.createElement('div');
-                card.className = 'product-card';
-                if (cart[item.id]) card.classList.add('selected');
-                // 顯示目前選擇門市的庫存
-                const store = document.getElementById('store').value;
-                const stock = store === '高雄' ? item.gaoxiong : item.taizhong;
-                const inCart = cart[item.id] ? cart[item.id].qty : 0;
-                const stockClass = stock - inCart <= 0 ? 'out' : stock - inCart <= 5 ? 'low' : '';
-                card.innerHTML = `
-                    <div class="product-name">${item.name}</div>
-                    <div class="product-price">NT$${item.price}</div>
-                    <div class="product-stock ${stockClass}">
-                        ${store}庫存：${stock}${inCart ? `<br>結帳後剩 ${stock - inCart}` : ''}
-                    </div>
-                `;
-                card.onclick = () => {
+                itemsGrid.appendChild(productCard(item, esc(item.name), () => {
                     addToCart(item);
                     closeItemModal();
-                };
-                itemsGrid.appendChild(card);
+                }));
             });
+        }
+
+        // 品項卡：名稱、價格、目前門市的庫存
+        function productCard(item, nameHtml, onclick) {
+            const card = document.createElement('div');
+            card.className = 'product-card';
+            if (cart[item.id]) card.classList.add('selected');
+            const store = document.getElementById('store').value;
+            const stock = store === '高雄' ? item.gaoxiong : item.taizhong;
+            const inCart = cart[item.id] ? cart[item.id].qty : 0;
+            const stockClass = stock - inCart <= 0 ? 'out' : stock - inCart <= 5 ? 'low' : '';
+            card.innerHTML = `
+                <div class="product-name">${nameHtml}</div>
+                <div class="product-price">NT$${item.price}</div>
+                <div class="product-stock ${stockClass}">
+                    ${store}庫存：${stock}${inCart ? `<br>結帳後剩 ${stock - inCart}` : ''}
+                </div>
+            `;
+            card.onclick = onclick;
+            return card;
+        }
+
+        // ---- 搜尋商品（頂端搜尋框）：打分類、品項或口味/重量都找得到，點一下直接加入購物車 ----
+        function renderSearchResults(view, query) {
+            const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+            const found = seriesData.flatMap(s => s.items.map(i => ({ s, i })))
+                .filter(({ s, i }) => {
+                    const text = `${s.category} ${s.name} ${i.name}`.toLowerCase();
+                    return words.every(w => text.includes(w));
+                });
+            if (!found.length) {
+                view.innerHTML = `<div class="message">找不到「${esc(query)}」的商品</div>`;
+                return;
+            }
+            found.forEach(({ s, i }) => {
+                const label = !i.name || i.name === s.name ? s.name : `${s.name} ${i.name}`;
+                const card = productCard(i, `${esc(label)}<div class="product-cat">${esc(s.category)}</div>`, () => {
+                    addToCart(i);
+                    renderSeriesView();
+                });
+                card.classList.add('search-result');
+                view.appendChild(card);
+            });
+        }
+
+        function clearProductSearch() {
+            document.getElementById('productSearch').value = '';
+            renderSeriesView();
+        }
+
+        // ---- 新增商品（需要後台密碼；存進同一個資料庫，後台也看得到）----
+        function openNewProduct() {
+            const cats = [...new Set(seriesData.map(s => s.category))];
+            document.getElementById('npCategoryList').innerHTML = cats.map(c => `<option value="${esc(c)}">`).join('');
+            document.getElementById('npSeriesList').innerHTML = [...new Set(seriesData.map(s => s.name))].map(n => `<option value="${esc(n)}">`).join('');
+            ['npCategory', 'npSeries', 'npName', 'npPrice', 'npGaoxiong', 'npTaizhong', 'npPass'].forEach(id => document.getElementById(id).value = '');
+            document.getElementById('npMessage').innerHTML = '';
+            document.getElementById('newProductModal').hidden = false;
+            document.getElementById('npCategory').focus();
+        }
+
+        function closeNewProduct() {
+            document.getElementById('npPass').value = '';
+            document.getElementById('newProductModal').hidden = true;
+        }
+
+        async function saveNewProduct() {
+            const val = (id) => document.getElementById(id).value.trim();
+            const msg = document.getElementById('npMessage');
+            const fail = (text) => { msg.innerHTML = `<div class="message error">${esc(text)}</div>`; };
+            const body = { category: val('npCategory'), series: val('npSeries'), name: val('npName'),
+                price: val('npPrice'), gaoxiong: val('npGaoxiong'), taizhong: val('npTaizhong') };
+            if (!body.name && !body.series) return fail('請至少填品項或口味/重量');
+            const pass = document.getElementById('npPass').value;
+            if (!pass) return fail('請輸入後台密碼');
+
+            const btn = document.getElementById('npSaveBtn');
+            btn.disabled = true;
+            try {
+                const basic = btoa(String.fromCharCode(...new TextEncoder().encode(`admin:${pass}`)));
+                const res = await fetch(`${API_URL()}/api/products/create`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${basic}`, 'X-No-Auth-Prompt': '1' },
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json().catch(() => ({}));
+                if (res.status === 401) throw new Error('後台密碼錯誤');
+                if (!res.ok) throw new Error(data.message || res.status);
+                closeNewProduct();
+                // 新增完直接用搜尋顯示這個商品，可以馬上點來結帳
+                document.getElementById('productSearch').value = [body.series, body.name !== body.series ? body.name : ''].filter(Boolean).join(' ');
+                await loadProducts();
+            } catch (error) {
+                fail('新增失敗：' + error.message);
+            } finally {
+                document.getElementById('npPass').value = '';
+                btn.disabled = false;
+            }
         }
 
         function closeItemModal() {
