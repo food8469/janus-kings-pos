@@ -108,17 +108,20 @@ async function initDb() {
     );
     CREATE INDEX IF NOT EXISTS shift_closes_store_idx ON shift_closes (store, end_at);
     -- 折扣優惠（後台設定，前台結帳時點選）
-    -- type = amount：減 value 元；type = percent：打 value 折（9 = 9 折、85 = 85 折）
+    -- type = amount：減 value 元；type = percent：打 value 折（9 = 9 折、85 = 85 折）；
+    -- type = custom：結帳時店員自己輸入折扣金額（value 不用）
     CREATE TABLE IF NOT EXISTS discounts (
       id         SERIAL PRIMARY KEY,
       name       TEXT NOT NULL,
-      type       TEXT NOT NULL CHECK (type IN ('amount', 'percent')),
+      type       TEXT NOT NULL,
       value      NUMERIC NOT NULL,
       min_spend  INTEGER NOT NULL DEFAULT 0,
       active     BOOLEAN NOT NULL DEFAULT TRUE,
       sort_order INTEGER NOT NULL DEFAULT 0,
       note       TEXT
     );
+    ALTER TABLE discounts DROP CONSTRAINT IF EXISTS discounts_type_check;
+    ALTER TABLE discounts ADD CONSTRAINT discounts_type_check CHECK (type IN ('amount', 'percent', 'custom'));
     -- 前台圖卡圖片：key = 'cat:分類' 或 'series:分類|系列'
     CREATE TABLE IF NOT EXISTS tile_images (
       key     TEXT PRIMARY KEY,
@@ -141,6 +144,7 @@ async function initDb() {
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS note TEXT;
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS source TEXT;
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS joined_at DATE;
+    ALTER TABLE customers ADD COLUMN IF NOT EXISTS tax_id TEXT;
     -- 從舊系統匯入的累積消費（新系統的消費另外從 sales 計算）
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS legacy_spent INTEGER NOT NULL DEFAULT 0;
     ALTER TABLE customers ADD COLUMN IF NOT EXISTS legacy_orders INTEGER NOT NULL DEFAULT 0;
@@ -370,8 +374,8 @@ app.get('/api/admin/discounts', requireAdmin, async (req, res) => {
 app.post('/api/admin/discounts', requireAdmin, async (req, res) => {
   const b = req.body || {};
   const name = String(b.name || '').trim().slice(0, 50);
-  const type = b.type === 'percent' ? 'percent' : 'amount';
-  const value = Number(b.value);
+  const type = ['percent', 'custom'].includes(b.type) ? b.type : 'amount';
+  const value = type === 'custom' ? 0 : Number(b.value);
   const minSpend = toInt(b.min_spend, '滿額門檻') ?? 0;
   const note = String(b.note || '').trim().slice(0, 200) || null;
   const active = b.active === undefined ? true : !!b.active;
@@ -589,7 +593,9 @@ app.post('/api/customers', requireDevice, async (req, res) => {
   const name = cleanText(req.body?.name, 30);
   const phone = cleanText(req.body?.phone, 30);
   const address = cleanText(req.body?.address, 200);
-  if (!name && !phone && !address) return res.status(400).json({ status: 'error', message: '請至少填一個欄位' });
+  const birthday = cleanDate(req.body?.birthday);
+  const taxId = cleanTaxId(req.body?.tax_id);
+  if (!name && !phone && !address) return res.status(400).json({ status: 'error', message: '請至少填姓名、電話或地址其中一個' });
   if (phone && /\d/.test(phone)) {
     // 只比數字：0912-345-678 和 0912345678 算同一支電話
     const { rows: [dup] } = await pool.query(
@@ -597,7 +603,8 @@ app.post('/api/customers', requireDevice, async (req, res) => {
     if (dup) return res.status(409).json({ status: 'error', message: `這支電話已經建檔（${dup.name || '未填姓名'}）`, data: dup });
   }
   const { rows: [customer] } = await pool.query(
-    'INSERT INTO customers (name, phone, address) VALUES ($1, $2, $3) RETURNING *', [name, phone, address]);
+    'INSERT INTO customers (name, phone, address, birthday, tax_id) VALUES ($1, $2, $3, $4, $5) RETURNING *',
+    [name, phone, address, birthday, taxId]);
   res.json({ status: 'success', message: '已新增顧客', data: customer });
 });
 
@@ -605,6 +612,14 @@ app.post('/api/customers', requireDevice, async (req, res) => {
 function cleanDate(v) {
   const s = String(v ?? '').trim();
   return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : null;
+}
+
+// 統一編號：8 位數字，其他（含空白）當作沒填
+function cleanTaxId(v) {
+  const s = String(v ?? '').replace(/\s/g, '');
+  if (!s) return null;
+  if (!/^\d{8}$/.test(s)) throw new InputError('統一編號要是 8 位數字');
+  return s;
 }
 
 // 修改顧客資料（只改有送來的欄位）
@@ -616,6 +631,7 @@ app.post('/api/customers/update', requireDevice, async (req, res) => {
     address: () => cleanText(body.address, 200),
     note: () => cleanText(body.note, 500),
     birthday: () => cleanDate(body.birthday),
+    tax_id: () => cleanTaxId(body.tax_id),
   };
   const sets = [];
   const params = [toInt(body.id, '顧客')];
@@ -644,6 +660,7 @@ app.post('/api/admin/customers/import', requireAdmin, async (req, res) => {
         name: cleanText(c.name, 30), phone: cleanText(c.phone, 30), address: cleanText(c.address, 200),
         note: cleanText(c.note, 500), source: cleanText(c.source, 100),
         birthday: cleanDate(c.birthday), joined_at: cleanDate(c.joined_at),
+        tax_id: /^\d{8}$/.test(String(c.tax_id ?? '')) ? String(c.tax_id) : null,
         legacy_spent: Math.max(0, Math.round(Number(c.legacy_spent) || 0)),
         legacy_orders: Math.max(0, Math.round(Number(c.legacy_orders) || 0)),
       };
@@ -656,15 +673,15 @@ app.post('/api/admin/customers/import', requireAdmin, async (req, res) => {
           `UPDATE customers SET
              name = COALESCE(name, $2), address = COALESCE(address, $3), note = COALESCE(note, $4),
              source = COALESCE(source, $5), birthday = COALESCE(birthday, $6), joined_at = COALESCE(joined_at, $7),
-             legacy_spent = $8, legacy_orders = $9
+             legacy_spent = $8, legacy_orders = $9, tax_id = COALESCE(tax_id, $10)
            WHERE id = $1`,
-          [existing.id, row.name, row.address, row.note, row.source, row.birthday, row.joined_at, row.legacy_spent, row.legacy_orders]);
+          [existing.id, row.name, row.address, row.note, row.source, row.birthday, row.joined_at, row.legacy_spent, row.legacy_orders, row.tax_id]);
         updated++;
       } else {
         await client.query(
-          `INSERT INTO customers (name, phone, address, note, source, birthday, joined_at, legacy_spent, legacy_orders, created_at)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, COALESCE($7::date::timestamptz, NOW()))`,
-          [row.name, row.phone, row.address, row.note, row.source, row.birthday, row.joined_at, row.legacy_spent, row.legacy_orders]);
+          `INSERT INTO customers (name, phone, address, note, source, birthday, joined_at, legacy_spent, legacy_orders, tax_id, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($7::date::timestamptz, NOW()))`,
+          [row.name, row.phone, row.address, row.note, row.source, row.birthday, row.joined_at, row.legacy_spent, row.legacy_orders, row.tax_id]);
         added++;
       }
     }

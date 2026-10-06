@@ -242,6 +242,8 @@
         .qty-btn:active { background: #dde3ff; }
         .qty-stepper .qty-input { width: 44px; height: 38px; border: none; border-radius: 0; padding: 0; text-align: center; font-size: 16px; font-weight: bold; -moz-appearance: textfield; }
         .qty-stepper .qty-input::-webkit-inner-spin-button, .qty-stepper .qty-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        .custom-discount { flex: 1 1 100%; display: flex; align-items: center; gap: 6px; font-size: 14px; color: #c92a2a; margin-top: 4px; }
+        .custom-discount input { flex: 1; min-width: 0; padding: 9px; font-size: 16px; border: 1.5px solid #ffa8a8; border-radius: 6px; }
         .preset-empty { font-size: 13px; color: #999; padding: 4px 2px; }
         .preset-chip:disabled { opacity: 0.45; cursor: not-allowed; }
         .staff-select { max-width: 60%; }
@@ -503,7 +505,17 @@
                 <input type="tel" id="custPhone" maxlength="30" placeholder="手機或市話，例：0912-345-678、07-123-4567">
                 <label>地址</label>
                 <input type="text" id="custAddress" maxlength="200" placeholder="例：高雄市…">
-                <p class="hint-text">都可以不填，想填哪個就填哪個（至少填一個）。</p>
+                <div style="display: flex; gap: 10px;">
+                    <div style="flex: 1; min-width: 0;">
+                        <label>生日</label>
+                        <input type="date" id="custBirthday" max="9999-12-31">
+                    </div>
+                    <div style="flex: 1; min-width: 0;">
+                        <label>統一編號</label>
+                        <input type="text" id="custTaxId" maxlength="8" inputmode="numeric" placeholder="8 位數字">
+                    </div>
+                </div>
+                <p class="hint-text">都可以不填，姓名、電話、地址至少填一個。有填統編的顧客，結帳時會自動帶入統一編號。</p>
                 <button class="checkout-btn" id="custSaveBtn" onclick="saveCustomer()">💾 儲存並選用</button>
                 <div id="custMessage"></div>
             </div>
@@ -1066,6 +1078,10 @@
         const customerText = (c) => c.name || c.phone || c.address || `顧客 #${c.id}`;
 
         function setCustomer(c) {
+            // 顧客有統編 → 結帳自動帶入；換掉或取消顧客時，把原本帶入的統編拿掉
+            if (customer && customer.tax_id && taxId === customer.tax_id) taxId = '';
+            if (c && c.tax_id && !taxId) taxId = c.tax_id;
+            renderPayment();
             customer = c;
             const label = document.getElementById('customerLabel');
             label.innerHTML = c
@@ -1102,7 +1118,7 @@
             if (view === 'form' && !editingCustomerId) {
                 document.getElementById('custTitle').textContent = '＋ 新增顧客';
                 document.getElementById('custSaveBtn').textContent = '💾 儲存並選用';
-                ['custName', 'custPhone', 'custAddress'].forEach(id => document.getElementById(id).value = '');
+                ['custName', 'custPhone', 'custAddress', 'custBirthday', 'custTaxId'].forEach(id => document.getElementById(id).value = '');
                 document.getElementById('custName').focus();
             }
             if (view !== 'form') editingCustomerId = null;
@@ -1151,6 +1167,7 @@
                     <div>📞 ${esc(c.phone || '（未填電話）')}</div>
                     <div>🏠 ${esc(c.address || '（未填地址）')}</div>
                     ${c.birthday ? `<div>🎂 ${esc(c.birthday)}</div>` : ''}
+                    ${c.tax_id ? `<div>🧾 統編 ${esc(c.tax_id)}</div>` : ''}
                     ${c.note ? `<div>📝 ${esc(c.note)}</div>` : ''}`;
 
                 // 同單號合成一張單
@@ -1203,6 +1220,8 @@
             document.getElementById('custName').value = c.name || '';
             document.getElementById('custPhone').value = c.phone || '';
             document.getElementById('custAddress').value = c.address || '';
+            document.getElementById('custBirthday').value = c.birthday || '';
+            document.getElementById('custTaxId').value = c.tax_id || '';
         }
 
         async function saveCustomer() {
@@ -1210,11 +1229,18 @@
             const body = {
                 name: document.getElementById('custName').value.trim(),
                 phone: document.getElementById('custPhone').value.trim(),
-                address: document.getElementById('custAddress').value.trim()
+                address: document.getElementById('custAddress').value.trim(),
+                birthday: document.getElementById('custBirthday').value,
+                tax_id: document.getElementById('custTaxId').value.replace(/\s/g, '')
             };
             if (!body.name && !body.phone && !body.address) {
                 msg.className = 'message error';
-                msg.textContent = '請至少填一個欄位';
+                msg.textContent = '姓名、電話、地址至少填一個';
+                return;
+            }
+            if (body.tax_id && !/^\d{8}$/.test(body.tax_id)) {
+                msg.className = 'message error';
+                msg.textContent = '統一編號要是 8 位數字';
                 return;
             }
             const editing = editingCustomerId;
@@ -1269,10 +1295,11 @@
 
         function closeDiscountEdit() {
             document.getElementById('discountPresets').hidden = true;
+            customPresetId = null;
         }
 
         const subtotalOf = () => Object.values(cart).reduce((sum, i) => sum + i.qty * i.price, 0);
-        const discountName = (d) => d.type === 'amount' ? `減 NT$${d.value.toLocaleString()}` : `${d.value} 折`;
+        const discountName = (d) => d.type === 'custom' ? '自己輸入金額' : d.type === 'amount' ? `減 NT$${d.value.toLocaleString()}` : `${d.value} 折`;
 
         function renderDiscountPresets() {
             const subtotal = subtotalOf();
@@ -1287,14 +1314,46 @@
                     onclick="applyPreset(${d.id})" title="${esc(d.note || '')}">
                     ${esc(d.name)}<small>${discountName(d)}${d.min_spend ? `・滿${d.min_spend.toLocaleString()}` : ''}</small></button>`;
             }).join('');
+            // 「結帳時自己輸入金額」的優惠：點了之後在下面輸入要折多少
+            const custom = discountPresets.find(d => d.id === customPresetId);
+            if (custom) {
+                panel.insertAdjacentHTML('beforeend', `
+                    <div class="custom-discount">
+                        <span>${esc(custom.name)}：折</span>
+                        <input type="number" id="customDiscountValue" min="1" inputmode="numeric" placeholder="輸入金額"
+                               onkeydown="if (event.key === 'Enter') applyCustomDiscount()">
+                        <span>元</span>
+                        <button class="small-btn" onclick="applyCustomDiscount()">套用</button>
+                    </div>`);
+                setTimeout(() => document.getElementById('customDiscountValue')?.focus(), 0);
+            }
         }
+
+        let customPresetId = null;   // 正在輸入金額的「自己輸入」優惠
 
         function applyPreset(id) {
             const d = discountPresets.find(x => x.id === id);
             if (!d) return;
             // 再點一次同一個優惠 = 取消
-            if (discount && discount.id === id) return clearDiscount();
+            if (discount && discount.id === id) { customPresetId = null; return clearDiscount(); }
+            if (d.type === 'custom') {
+                customPresetId = customPresetId === id ? null : id;
+                return renderDiscountPresets();
+            }
+            customPresetId = null;
             discount = { id: d.id, name: d.name, type: d.type, value: d.value, min_spend: d.min_spend || 0 };
+            closeDiscountEdit();
+            renderCart();
+        }
+
+        function applyCustomDiscount() {
+            const d = discountPresets.find(x => x.id === customPresetId);
+            const value = Number(document.getElementById('customDiscountValue').value);
+            if (!d) return;
+            if (!Number.isInteger(value) || value <= 0) return showMessage('折扣金額請填大於 0 的整數', 'error');
+            if (value > subtotalOf()) return showMessage(`折扣不能超過小計 NT$${subtotalOf().toLocaleString()}`, 'error');
+            discount = { id: d.id, name: d.name, type: 'amount', value, min_spend: d.min_spend || 0 };
+            customPresetId = null;
             closeDiscountEdit();
             renderCart();
         }

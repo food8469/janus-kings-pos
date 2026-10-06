@@ -135,7 +135,7 @@
             <div id="customerSummary" class="stat-box"></div>
             <table id="customerTable">
                 <thead>
-                    <tr><th>姓名</th><th>電話</th><th>地址</th><th>購買次數</th><th>累計消費</th><th>最近消費</th><th></th></tr>
+                    <tr><th>姓名</th><th>電話</th><th>地址</th><th>生日</th><th>統編</th><th>購買次數</th><th>累計消費</th><th>最近消費</th><th></th></tr>
                 </thead>
                 <tbody></tbody>
             </table>
@@ -152,6 +152,7 @@
                     <select id="dcType" onchange="updateDcPlaceholder()">
                         <option value="amount">減金額</option>
                         <option value="percent">打折</option>
+                        <option value="custom">結帳時自己輸入金額</option>
                     </select>
                     <input type="number" id="dcValue" min="0" step="any" placeholder="減多少元，例：100">
                     <input type="number" id="dcMin" min="0" placeholder="滿多少才能用（沒有就空白）">
@@ -164,7 +165,7 @@
                 <thead><tr><th class="sort-col">排序</th><th>優惠名稱</th><th>折扣</th><th>使用條件</th><th>備註</th><th>狀態</th><th></th></tr></thead>
                 <tbody></tbody>
             </table>
-            <p class="hint">「上架中」的優惠會出現在前台購物車的「🏷️ 折扣」，店員直接點選就好；有設定滿額的，金額不到不能選。打折：9 折填 9、85 折填 85。前台還是可以手動輸入其他折扣。</p>
+            <p class="hint">「上架中」的優惠會出現在前台購物車的「🏷️ 折扣」，店員直接點選就好；有設定滿額的，金額不到不能選。打折：9 折填 9、85 折填 85。選「結帳時自己輸入金額」的優惠（例：現金折扣），店員點了之後再輸入要折多少錢。</p>
         </div>
 
         <!-- 打卡設定 -->
@@ -473,7 +474,7 @@
         // ============ 折扣優惠 ============
         let discountList = [];
         let editingDiscountId = null;
-        const discountText = (d) => d.type === 'amount' ? `減 NT$${Number(d.value).toLocaleString()}` : `${d.value} 折`;
+        const discountText = (d) => d.type === 'custom' ? '結帳時輸入金額' : d.type === 'amount' ? `減 NT$${Number(d.value).toLocaleString()}` : `${d.value} 折`;
 
         async function loadDiscounts() {
             try {
@@ -505,8 +506,11 @@
         }
 
         function updateDcPlaceholder() {
-            document.getElementById('dcValue').placeholder = document.getElementById('dcType').value === 'amount'
-                ? '減多少元，例：100' : '打幾折：9 折填 9、85 折填 85';
+            const type = document.getElementById('dcType').value;
+            const input = document.getElementById('dcValue');
+            // 「結帳時自己輸入」不用先填金額
+            input.hidden = type === 'custom';
+            input.placeholder = type === 'amount' ? '減多少元，例：100' : '打幾折：9 折填 9、85 折填 85';
         }
 
         function resetDiscountForm() {
@@ -543,7 +547,7 @@
             const body = { id: editingDiscountId, name: val('dcName'), type: val('dcType'), value: val('dcValue'),
                 min_spend: val('dcMin'), note: val('dcNote'), active: old ? old.active : true };
             if (!body.name) return alert('請填優惠名稱');
-            if (!body.value) return alert(body.type === 'amount' ? '請填減多少元' : '請填打幾折');
+            if (body.type !== 'custom' && !body.value) return alert(body.type === 'amount' ? '請填減多少元' : '請填打幾折');
             try {
                 await postJson('/api/admin/discounts', body);
                 resetDiscountForm();
@@ -724,6 +728,8 @@
                     <td>${escHtml(c.name || '（未填）')}</td>
                     <td>${escHtml(c.phone || '')}</td>
                     <td>${escHtml(c.address || '')}</td>
+                    <td style="white-space: nowrap;">${c.birthday ? String(c.birthday).slice(0, 10) : ''}</td>
+                    <td>${escHtml(c.tax_id || '')}</td>
                     <td>${custOrders(c)}</td>
                     <td>NT$${custSpent(c).toLocaleString()}</td>
                     <td>${fmtDate(c.last_visit)}</td>
@@ -732,8 +738,8 @@
                         <button class="row-btn danger" onclick="deleteCustomer(${c.id})">🗑️</button>
                     </td>
                 </tr>
-                <tr class="detail-row" id="customerDetail${c.id}" hidden><td colspan="7"></td></tr>`).join('')
-                : `<tr><td colspan="7" style="color:#999">${allCustomers.length ? '找不到符合的顧客' : '還沒有建檔的顧客'}</td></tr>`;
+                <tr class="detail-row" id="customerDetail${c.id}" hidden><td colspan="9"></td></tr>`).join('')
+                : `<tr><td colspan="9" style="color:#999">${allCustomers.length ? '找不到符合的顧客' : '還沒有建檔的顧客'}</td></tr>`;
             if (openCustomerId) {
                 const id = openCustomerId;
                 openCustomerId = null;
@@ -764,6 +770,7 @@
                         <input type="tel" id="editCustPhone${id}" value="${escHtml(c.phone || '')}" placeholder="電話" maxlength="30">
                         <input type="text" id="editCustAddress${id}" value="${escHtml(c.address || '')}" placeholder="地址" maxlength="200">
                         <input type="date" id="editCustBirthday${id}" value="${c.birthday ? String(c.birthday).slice(0, 10) : ''}" title="生日">
+                        <input type="text" id="editCustTaxId${id}" value="${escHtml(c.tax_id || '')}" placeholder="統一編號（8 位數字）" maxlength="8" inputmode="numeric">
                         <input type="text" id="editCustNote${id}" value="${escHtml(c.note || '')}" placeholder="備註" maxlength="500">
                         <button onclick="saveCustomerEdit(${id})">💾 保存</button>
                     </div>
@@ -790,8 +797,9 @@
         async function saveCustomerEdit(id) {
             const val = (p) => document.getElementById(`${p}${id}`).value.trim();
             const body = { id, name: val('editCustName'), phone: val('editCustPhone'), address: val('editCustAddress'),
-                           birthday: val('editCustBirthday'), note: val('editCustNote') };
-            if (!body.name && !body.phone && !body.address) { alert('請至少填一個欄位'); return; }
+                           birthday: val('editCustBirthday'), tax_id: val('editCustTaxId'), note: val('editCustNote') };
+            if (body.tax_id && !/^\d{8}$/.test(body.tax_id)) { alert('統一編號要是 8 位數字'); return; }
+            if (!body.name && !body.phone && !body.address) { alert('姓名、電話、地址至少填一個'); return; }
             try {
                 await postJson('/api/customers/update', body);
                 alert('已保存');
@@ -873,6 +881,7 @@
             phone: ['會員綁定手機號碼', '手機號碼', '手機', '電話', '聯絡電話', 'phone'],
             address: ['地址', '收件地址', '通訊地址', 'address'],
             birthday: ['生日', '出生日期', 'birthday'],
+            tax_id: ['統一編號', '統編', 'tax_id'],
             note: ['備註', 'note'],
             source: ['加入來源', '來源'],
             joined_at: ['加入日期', '會員註冊日期', '建立日期', '註冊日期'],
@@ -918,6 +927,7 @@
                     phone: col.phone ? normalizePhone(r[col.phone]) : '',
                     address: col.address ? String(r[col.address]).trim() : '',
                     birthday: col.birthday ? normalizeDate(r[col.birthday]) : '',
+                    tax_id: col.tax_id ? String(r[col.tax_id]).replace(/\D/g, '') : '',
                     note: col.note ? String(r[col.note]).trim() : '',
                     source: col.source ? String(r[col.source]).trim() : '',
                     joined_at: col.joined_at ? normalizeDate(r[col.joined_at]) : '',
@@ -965,8 +975,8 @@
         }
 
         function exportCustomers() {
-            const rows = [['姓名', '電話', '地址', '生日', '備註', '來源', '購買次數', '累計消費', '最近消費', '建檔日期'],
-                ...filteredCustomers().map(c => [c.name || '', c.phone || '', c.address || '', c.birthday ? String(c.birthday).slice(0, 10) : '',
+            const rows = [['姓名', '電話', '地址', '生日', '統一編號', '備註', '來源', '購買次數', '累計消費', '最近消費', '建檔日期'],
+                ...filteredCustomers().map(c => [c.name || '', c.phone || '', c.address || '', c.birthday ? String(c.birthday).slice(0, 10) : '', c.tax_id || '',
                     c.note || '', c.source || '', custOrders(c), custSpent(c), fmtDate(c.last_visit), fmtDate(c.created_at)])];
             exportXlsx(rows, `野烏金顧客名單_${today()}.xlsx`, '顧客名單');
         }
