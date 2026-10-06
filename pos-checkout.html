@@ -73,10 +73,18 @@
 
         [hidden] { display: none !important; }
         /* 商品圖片 */
-        .series-card:not(.has-img) { display: flex; flex-direction: column; justify-content: center; }
-        .series-card.has-img { padding: 0; overflow: hidden; }
-        .series-card.has-img .series-text { padding: 12px 10px 14px; }
-        .series-img { width: 100%; height: 120px; object-fit: cover; display: block; background: #eee; }
+        /* 系列圖卡（上圖下字） */
+        .left { background: #f4f4f6; }
+        #seriesView { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; }
+        #seriesView .series-card { background: white; color: #333; padding: 0; border-radius: 12px; overflow: hidden;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08); display: flex; flex-direction: column; text-align: center; }
+        #seriesView .series-card:hover { transform: translateY(-3px); box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12); }
+        .tile-img { aspect-ratio: 4 / 3; background: #1f2a44; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+        .tile-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .tile-img span { color: white; font-size: 26px; font-weight: bold; letter-spacing: 2px; padding: 0 10px; line-height: 1.3; }
+        .tile-label { padding: 12px 8px 14px; }
+        #seriesView .series-card .tile-label h3 { font-size: 15px; font-weight: 600; margin: 0; color: #333; }
+        #seriesView .series-card .tile-label p { font-size: 12px; color: #999; margin-top: 4px; opacity: 1; }
         .product-img { width: 100%; height: 110px; object-fit: cover; border-radius: 6px; display: block; background: #f3f3f3; }
         .cart-thumb { width: 42px; height: 42px; object-fit: cover; border-radius: 6px; margin-right: 10px; flex: 0 0 auto; }
         .series-heading { grid-column: 1 / -1; font-size: 15px; font-weight: bold; color: #555; padding: 6px 2px 0; border-bottom: 2px solid #eee; margin-top: 4px; }
@@ -624,13 +632,15 @@
                     lastCategory = series.category;
                 }
                 const card = document.createElement('div');
-                // 系列卡片用這個系列第一張有圖的商品圖片
+                // 圖卡：上面大圖（用這個系列第一張有圖的商品照片；沒有圖就深藍底白字），下面白底名稱
                 const cover = series.items.find(i => i.image);
-                card.className = 'series-card' + (cover ? ' has-img' : '');
+                card.className = 'series-card';
                 card.innerHTML = `
-                    ${cover ? `<img class="series-img" src="${cover.image}" alt="" loading="lazy">` : ''}
-                    <div class="series-text">
-                        <h3>${series.name}</h3>
+                    <div class="tile-img">
+                        ${cover ? `<img src="${cover.image}" alt="" loading="lazy">` : `<span>${esc(series.name)}</span>`}
+                    </div>
+                    <div class="tile-label">
+                        <h3>${esc(series.name)}</h3>
                         <p>${series.items.length} 個品項</p>
                     </div>
                 `;
