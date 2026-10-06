@@ -515,7 +515,7 @@
         <div class="lock-card">
             <div style="font-size: 48px;">🔒</div>
             <h2>此裝置未授權</h2>
-            <p>這台裝置還沒有登記為門市裝置，<br>不能使用收銀台、打卡和結帳紀錄。<br>請店長在下面登記這台裝置。</p>
+            <p>這台裝置還沒有登記為門市裝置，<br>不能使用收銀台、打卡和交易紀錄。<br>請店長在下面登記這台裝置。</p>
             <div class="lock-form">
                 <label>裝置名稱</label>
                 <input type="text" id="regName" placeholder="例：高雄櫃台平板" maxlength="30">
@@ -559,7 +559,7 @@
                     </button>
                     <button class="menu-item" onclick="showMenuTab('orders')">
                         <span class="menu-icon">🧾</span>
-                        <span><b>結帳紀錄</b><small>今日每一筆結帳</small></span>
+                        <span><b>交易紀錄</b><small>今日每一筆結帳</small></span>
                     </button>
                     <button class="menu-item" onclick="showMenuTab('close')">
                         <span class="menu-icon">📋</span>
@@ -1746,7 +1746,7 @@
 
         function showMenuTab(tab) {
             menuTab = tab;
-            const titles = { home: '☰ 選單', punch: '🕐 打卡', orders: '🧾 結帳紀錄', close: '📋 小結' };
+            const titles = { home: '☰ 選單', punch: '🕐 打卡', orders: '🧾 交易紀錄', close: '📋 小結' };
             document.getElementById('menuTitle').textContent = titles[tab];
             document.getElementById('menuBack').hidden = tab === 'home';
             document.getElementById('menuHome').hidden = tab !== 'home';
@@ -1897,7 +1897,7 @@
                             </div>`).join('')}
                         ${o.discount ? `<div class="order-line" style="color:#e03131"><span>整單折扣</span><span>-NT$${o.discount.toLocaleString()}</span></div>` : ''}
                         <div class="order-total"><span>合計</span><span>NT$${o.total.toLocaleString()}</span></div>
-                    </div>`).join('') : '<div class="empty">今天還沒有結帳紀錄</div>';
+                    </div>`).join('') : '<div class="empty">今天還沒有交易紀錄</div>';
             } catch (error) {
                 list.innerHTML = `<div class="message error">載入失敗：${esc(error.message)}</div>`;
             }
