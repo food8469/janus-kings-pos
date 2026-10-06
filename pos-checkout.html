@@ -1055,7 +1055,7 @@
                 cartDiv.innerHTML += `
                     <div class="cart-item">
                         <div class="cart-item-info">
-                            <div class="cart-item-name">${item.series ? esc(item.series) + ' ' : ''}${esc(item.name)}</div>
+                            <div class="cart-item-name">${item.series && item.series !== item.name ? esc(item.series) + ' ' : ''}${esc(item.name)}</div>
                             <div class="cart-item-qty">NT$${item.price} × ${item.qty}</div>
                         </div>
                         <div style="display: flex; gap: 5px; align-items: center;">
