@@ -129,6 +129,8 @@ async function initDb() {
       pin_hash   TEXT,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    -- 員工所屬門市：'高雄'、'台中'，NULL = 兩店都有
+    ALTER TABLE staff ADD COLUMN IF NOT EXISTS store TEXT;
     -- 門市裝置（只有登記過的裝置可以使用前台與打卡）
     CREATE TABLE IF NOT EXISTS punch_devices (
       id         SERIAL PRIMARY KEY,
@@ -543,7 +545,10 @@ const LOCK_MS = 5 * 60 * 1000;
 
 // 前台：員工名單（只有名字）
 app.get('/api/staff', requireDevice, async (req, res) => {
-  const { rows } = await pool.query('SELECT name FROM staff ORDER BY created_at, name');
+  // 門市裝置只拿到這家門市的人員（含兩店都有的）；後台拿全部
+  const store = req.device ? req.device.store : null;
+  const { rows } = await pool.query(
+    'SELECT name FROM staff WHERE $1::text IS NULL OR store IS NULL OR store = $1 ORDER BY created_at, name', [store]);
   res.json({ status: 'success', data: rows.map(r => r.name) });
 });
 
@@ -566,6 +571,9 @@ app.post('/api/attendance/punch', async (req, res) => {
   const { rows: [person] } = await pool.query('SELECT * FROM staff WHERE name = $1', [name]);
   if (!person) return res.status(400).json({ status: 'error', message: '請選擇人員' });
   if (!person.pin_hash) return res.status(400).json({ status: 'error', message: `${name} 還沒有打卡密碼，請店長到後台設定` });
+  if (person.store && person.store !== device.store) {
+    return res.status(400).json({ status: 'error', message: `${name} 是${person.store}門市的人員，不能在${device.store}門市打卡` });
+  }
 
   const fail = pinFailures.get(name);
   if (fail && fail.count >= MAX_PIN_FAILURES && Date.now() - fail.at < LOCK_MS) {
@@ -590,14 +598,23 @@ app.post('/api/attendance/punch', async (req, res) => {
 
 // 後台：員工名單與密碼狀態
 app.get('/api/admin/staff', requireAdmin, async (req, res) => {
-  const { rows } = await pool.query('SELECT name, pin_hash IS NOT NULL AS has_pin FROM staff ORDER BY created_at, name');
+  const { rows } = await pool.query('SELECT name, store, pin_hash IS NOT NULL AS has_pin FROM staff ORDER BY created_at, name');
   res.json({ status: 'success', data: rows });
+});
+
+// 設定員工所屬門市（空白 = 兩店都有）
+app.post('/api/admin/staff/store', requireAdmin, async (req, res) => {
+  const store = STORE_KEYS[req.body?.store] ? req.body.store : null;
+  const { rowCount } = await pool.query('UPDATE staff SET store = $2 WHERE name = $1', [req.body?.name, store]);
+  if (!rowCount) return res.status(404).json({ status: 'error', message: '找不到這位員工' });
+  res.json({ status: 'success', message: '已更新門市' });
 });
 
 app.post('/api/admin/staff', requireAdmin, async (req, res) => {
   const name = String(req.body?.name || '').trim().slice(0, 30);
   if (!name) return res.status(400).json({ status: 'error', message: '請填員工名字' });
-  const { rowCount } = await pool.query('INSERT INTO staff (name) VALUES ($1) ON CONFLICT DO NOTHING', [name]);
+  const store = STORE_KEYS[req.body?.store] ? req.body.store : null;
+  const { rowCount } = await pool.query('INSERT INTO staff (name, store) VALUES ($1, $2) ON CONFLICT DO NOTHING', [name, store]);
   if (!rowCount) return res.status(400).json({ status: 'error', message: `${name} 已經存在` });
   res.json({ status: 'success', message: '已新增員工' });
 });

@@ -170,14 +170,15 @@
             <div class="section">
                 <h3>👥 員工與打卡密碼</h3>
                 <table id="staffTable2">
-                    <thead><tr><th>員工</th><th>打卡密碼</th><th>設定新密碼</th><th></th></tr></thead>
+                    <thead><tr><th>員工</th><th>門市</th><th>打卡密碼</th><th>設定新密碼</th><th></th></tr></thead>
                     <tbody></tbody>
                 </table>
                 <div class="input-group">
                     <input type="text" id="newStaffName" placeholder="新員工名字">
+                    <select id="newStaffStore"><option value="">兩店都有</option><option value="高雄">高雄</option><option value="台中">台中</option></select>
                     <button onclick="addStaff()">➕ 新增員工</button>
                 </div>
-                <p class="hint">密碼是 4～6 位數字，只有員工本人知道，打卡時要輸入。前台結帳的「銷售人員」也會使用這份名單。</p>
+                <p class="hint">密碼是 4～6 位數字，只有員工本人知道，打卡時要輸入。門市選「高雄」或「台中」，前台打卡和結帳的「銷售人員」就只會在那家門市出現；選「兩店都有」兩邊都會出現。</p>
             </div>
         </div>
 
@@ -713,6 +714,10 @@
                 document.querySelector('#staffTable2 tbody').innerHTML = staff.map(s => `
                     <tr>
                         <td>${escHtml(s.name)}</td>
+                        <td><select data-staff="${escHtml(s.name)}" onchange="setStaffStore(this)">
+                            ${[['', '兩店都有'], ['高雄', '高雄'], ['台中', '台中']].map(([v, label]) =>
+                                `<option value="${v}" ${(s.store || '') === v ? 'selected' : ''}>${label}</option>`).join('')}
+                        </select></td>
                         <td>${s.has_pin ? '<span style="color:#2b8a3e">✅ 已設定</span>' : '<span style="color:#e03131">❌ 未設定（不能打卡）</span>'}</td>
                         <td>
                             <input type="password" inputmode="numeric" maxlength="6" placeholder="4～6 位數字" style="width: 120px;" data-staff="${escHtml(s.name)}">
@@ -767,11 +772,26 @@
             }
         }
 
+        // 員工所屬門市：前台打卡和結帳只會列出這家門市的人員
+        async function setStaffStore(select) {
+            select.disabled = true;
+            try {
+                await postJson('/api/admin/staff/store', { name: select.dataset.staff, store: select.value });
+                select.style.background = '#d3f9d8';
+                setTimeout(() => select.style.background = '', 800);
+            } catch (error) {
+                alert('更新門市失敗: ' + error.message);
+                loadPunchSettings();
+            } finally {
+                select.disabled = false;
+            }
+        }
+
         async function addStaff() {
             const name = document.getElementById('newStaffName').value.trim();
             if (!name) { alert('請填員工名字'); return; }
             try {
-                await postJson('/api/admin/staff', { name });
+                await postJson('/api/admin/staff', { name, store: document.getElementById('newStaffStore').value });
                 document.getElementById('newStaffName').value = '';
                 loadPunchSettings();
             } catch (error) {
