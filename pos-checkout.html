@@ -588,7 +588,9 @@
 
                 // 品項視窗開著的話，換成最新庫存
                 if (currentSeries) {
-                    currentSeries = seriesData.find(s => s.category === currentSeries.category && s.name === currentSeries.name) || null;
+                    currentSeries = currentSeries.merged
+                        ? mergedSeries(currentSeries.category)
+                        : seriesData.find(s => s.category === currentSeries.category && s.name === currentSeries.name) || null;
                     if (currentSeries) renderItemsView(); else closeItemModal();
                 }
             } catch (error) {
@@ -698,6 +700,10 @@
                     if (DRILL_CATEGORIES.includes(category)) {
                         const cover = ofCategory.flatMap(s => s.items).find(i => i.image);
                         seriesView.appendChild(makeTile(cover?.image, category, `${ofCategory.length} 種口味`, () => openDrill(category)));
+                    } else if (SINGLE_TILE_CATEGORIES.includes(category)) {
+                        const merged = mergedSeries(category);
+                        seriesView.appendChild(makeTile(merged.items.find(i => i.image)?.image, category,
+                            `${merged.items.length} 個品項`, () => selectSeries(mergedSeries(category))));
                     } else {
                         ofCategory.forEach(s => seriesView.appendChild(seriesTile(s)));
                     }
@@ -711,6 +717,16 @@
         // 這些分類先顯示一張分類卡，點進去才是口味，再點選兩數
         const DRILL_CATEGORIES = ['整片系列', '頂規整片'];
         let drillCategory = null;   // 目前點進去的分類卡
+
+        // 這些分類只顯示一張卡，點進去一次列出整個分類的品項（例如試吃：鹽味、紅酒…）
+        const SINGLE_TILE_CATEGORIES = ['試吃'];
+
+        // 把一個分類的所有系列合成一個「系列」：品項名稱用口味（系列名），同一口味有多個品項時再加上品名
+        function mergedSeries(category) {
+            const items = seriesData.filter(s => s.category === category).flatMap(s =>
+                s.items.map(i => ({ ...i, name: s.items.length > 1 ? `${s.name} ${i.name}` : s.name, series: category })));
+            return { category, name: category, items, merged: true };
+        }
         const tabOf = (category) => MERGED_TABS[category] || category;
 
         function selectSeries(series) {
