@@ -251,8 +251,13 @@ async function requireDevice(req, res, next) {
 }
 
 // ============ 頁面 ============
-app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'pos-checkout.html')));
-app.get('/admin', requireAdmin, (req, res) => res.sendFile(path.join(__dirname, 'pos-admin.html')));
+// 每次都向伺服器確認是不是最新版，平板 App 才不會一直用舊的頁面
+const sendPage = (file) => (req, res) => {
+  res.set('Cache-Control', 'no-cache');
+  res.sendFile(path.join(__dirname, file));
+};
+app.get('/', sendPage('pos-checkout.html'));
+app.get('/admin', requireAdmin, sendPage('pos-admin.html'));
 
 // App 設定檔與圖示（加到主畫面用）
 app.get(/^\/(manifest-(pos|admin)\.webmanifest|icon-(pos|admin)-(180|192|512)\.png)$/, (req, res) => {
