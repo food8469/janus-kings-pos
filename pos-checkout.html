@@ -1397,8 +1397,9 @@
                 const btn = document.createElement('button');
                 btn.className = 'staff-pick' + (n === current ? ' selected' : '');
                 btn.innerHTML = `<b>${esc(n)}</b><small class="${dutyStatus[n] === 'in' ? 'on' : ''}">${statusText[dutyStatus[n]] || '未打卡'}</small>`;
+                // 點一下選取；再點一次已選的人 = 取消選取
                 btn.onclick = () => {
-                    document.getElementById('staff').value = n;
+                    document.getElementById('staff').value = n === current ? '' : n;
                     updateStaffLabel();
                     closeStaffPicker();
                 };
