@@ -79,6 +79,9 @@ async function initDb() {
     -- 商品排列順序（後台可拖拉調整，前台照這個順序顯示）
     ALTER TABLE products ADD COLUMN IF NOT EXISTS sort_order INTEGER;
     UPDATE products SET sort_order = id WHERE sort_order IS NULL;
+    -- 商品圖片（壓縮後的 JPEG，存成 data URL）；image_version 用來讓瀏覽器換新圖
+    ALTER TABLE products ADD COLUMN IF NOT EXISTS image TEXT;
+    ALTER TABLE products ADD COLUMN IF NOT EXISTS image_version INTEGER NOT NULL DEFAULT 0;
     -- 同一次結帳的品項共用一個單號
     ALTER TABLE sales ADD COLUMN IF NOT EXISTS order_no TEXT;
     -- 整單折扣分到這一項的金額（total 已扣掉）
@@ -207,8 +210,42 @@ app.get(/^\/(manifest-(pos|admin)\.webmanifest|icon-(pos|admin)-(180|192|512)\.p
 
 // 1. 獲得庫存
 app.get('/api/inventory', requireDevice, async (req, res) => {
-  const { rows } = await pool.query('SELECT * FROM products ORDER BY sort_order NULLS LAST, id');
+  // 圖片本身很大，不放在清單裡；前台用 /api/products/:id/image 另外讀
+  const { rows } = await pool.query(
+    `SELECT id, category, series, name, price, gaoxiong, taizhong, active, sort_order,
+            image IS NOT NULL AS has_image, image_version
+     FROM products ORDER BY sort_order NULLS LAST, id`);
   res.json({ status: 'success', data: rows });
+});
+
+// 商品圖片（公開，網址帶 ?v= 版本號，瀏覽器可以長期快取）
+app.get('/api/products/:id/image', async (req, res) => {
+  const { rows: [p] } = await pool.query('SELECT image FROM products WHERE id = $1', [toInt(req.params.id, '商品')]);
+  const m = p && p.image && p.image.match(/^data:(image\/(?:jpeg|png|webp));base64,(.+)$/);
+  if (!m) return res.status(404).end();
+  res.set('Cache-Control', 'public, max-age=31536000, immutable');
+  res.type(m[1]).send(Buffer.from(m[2], 'base64'));
+});
+
+// 後台：上傳圖片，可以一次套用到好幾個商品（同一口味的不同重量）
+app.post('/api/admin/products/image', requireAdmin, async (req, res) => {
+  const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter(Number.isInteger);
+  const image = String(req.body?.image || '');
+  if (!ids.length) return res.status(400).json({ status: 'error', message: '請選擇商品' });
+  if (!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(image)) return res.status(400).json({ status: 'error', message: '圖片格式錯誤' });
+  if (image.length > 2_000_000) return res.status(400).json({ status: 'error', message: '圖片太大' });
+  const { rowCount } = await pool.query(
+    'UPDATE products SET image = $2, image_version = image_version + 1 WHERE id = ANY($1)', [ids, image]);
+  res.json({ status: 'success', message: `已更新 ${rowCount} 個商品的圖片` });
+});
+
+// 後台：移除圖片
+app.post('/api/admin/products/image/delete', requireAdmin, async (req, res) => {
+  const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter(Number.isInteger);
+  if (!ids.length) return res.status(400).json({ status: 'error', message: '請選擇商品' });
+  const { rowCount } = await pool.query(
+    'UPDATE products SET image = NULL, image_version = image_version + 1 WHERE id = ANY($1)', [ids]);
+  res.json({ status: 'success', message: `已移除 ${rowCount} 個商品的圖片` });
 });
 
 // 2. 銷售（結帳）

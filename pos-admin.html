@@ -45,6 +45,9 @@
         .hint { font-size: 12px; color: #999; margin-top: 10px; }
         #productForm.editing { border-color: #667eea; background: #f7f8ff; }
         [hidden] { display: none !important; }
+        .thumb { width: 44px; height: 44px; border: 1px dashed #ccc; border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer; overflow: hidden; background: #fafafa; font-size: 18px; }
+        .thumb:hover { border-color: #667eea; }
+        .thumb img { width: 100%; height: 100%; object-fit: cover; }
         button.collapse-btn { background: none; color: #4c5bd4; border: none; font-size: 16px; padding: 2px 8px; }
         button.collapse-btn:hover { background: #dde3ff; }
         td.group-title { cursor: pointer; user-select: none; }
@@ -261,6 +264,8 @@
                     <button id="saveSelectionBtn" onclick="saveSelection()">💾 保存修改</button>
                     <button class="secondary" onclick="batchSetActive(true)">上架</button>
                     <button class="secondary" onclick="batchSetActive(false)">下架</button>
+                    <button class="secondary" onclick="pickProductImage([...checkedIds])">🖼️ 上傳圖片</button>
+                    <button class="secondary" onclick="removeProductImage([...checkedIds])">移除圖片</button>
                     <button class="danger" onclick="batchDelete()">🗑️ 刪除</button>
                     <button class="secondary" onclick="clearChecks()">取消勾選</button>
                 </span>
@@ -274,7 +279,7 @@
 
             <table id="inventoryTable">
                 <thead>
-                    <tr><th class="sort-col" title="拖拉 ⠿ 或按 ▲▼ 調整順序">排序</th><th class="check-col"><input type="checkbox" id="checkAll" title="全選" onchange="toggleChecks(visibleIds(), this.checked)"></th><th>商品</th><th>高雄</th><th>台中</th><th>合計</th><th>單價</th><th>狀態</th></tr>
+                    <tr><th class="sort-col" title="拖拉 ⠿ 或按 ▲▼ 調整順序">排序</th><th class="check-col"><input type="checkbox" id="checkAll" title="全選" onchange="toggleChecks(visibleIds(), this.checked)"></th><th>圖片</th><th>商品</th><th>高雄</th><th>台中</th><th>合計</th><th>單價</th><th>狀態</th></tr>
                 </thead>
                 <tbody></tbody>
             </table>
@@ -1085,6 +1090,8 @@
                             <button class="move-btn" title="往下移" onclick="moveProduct(${p.id}, 1)">▼</button>
                         </td>
                         <td><input type="checkbox" class="row-check" data-id="${p.id}" onchange="toggleChecks([${p.id}], this.checked)"></td>
+                        <td><div class="thumb" title="${p.has_image ? '點一下換圖片' : '點一下上傳圖片'}" onclick="pickProductImage([${p.id}])">
+                            ${p.has_image ? `<img src="/api/products/${p.id}/image?v=${p.image_version}" alt="">` : '📷'}</div></td>
                         <td>${p.series}-${p.name}</td>
                         ${cell(p, 'gaoxiong')}
                         ${cell(p, 'taizhong')}
@@ -1264,11 +1271,11 @@
         // 庫存表的大分類標題列（多一個勾選框，可勾整個分類）
         function inventoryGroupRow(g) {
             const collapsed = collapsedCategories.has(g.category);
-            return groupHeaderRow(g, 6).replace('<td colspan="6">',
+            return groupHeaderRow(g, 7).replace('<td colspan="7">',
                 `<td><button class="collapse-btn" title="收合 / 展開" onclick="toggleCategory(this.closest('tr').dataset.category)">${collapsed ? '▸' : '▾'}</button></td>
                  <td><input type="checkbox" class="group-check" data-category="${g.category}"
                     onchange="toggleChecks(products.filter(p => p.category === this.dataset.category).map(p => p.id), this.checked)"></td>
-                 <td colspan="6" class="group-title" onclick="toggleCategory(this.closest('tr').dataset.category)">`);
+                 <td colspan="7" class="group-title" onclick="toggleCategory(this.closest('tr').dataset.category)">`);
         }
 
         // ---- 大分類收合 / 展開（記在這台瀏覽器）----
@@ -1297,6 +1304,72 @@
             collapsedCategories = new Set(collapse ? products.map(p => p.category) : []);
             saveCollapsed();
             applyCollapsed();
+        }
+
+        // ---- 商品圖片：選檔 → 瀏覽器先縮小壓縮 → 上傳（可一次套用到多個商品）----
+        let imageTargetIds = [];
+
+        function pickProductImage(ids) {
+            if (!ids.length) { alert('請先勾選商品'); return; }
+            imageTargetIds = ids;
+            let input = document.getElementById('productImageFile');
+            if (!input) {
+                input = document.createElement('input');
+                input.type = 'file';
+                input.accept = 'image/*';
+                input.id = 'productImageFile';
+                input.hidden = true;
+                input.onchange = () => { uploadProductImage(input.files[0]); input.value = ''; };
+                document.body.appendChild(input);
+            }
+            input.click();
+        }
+
+        // 縮成最長邊 600px 的 JPEG（手機照片幾 MB → 約 50KB）
+        function resizeImage(file, maxSize = 600) {
+            return new Promise((resolve, reject) => {
+                const url = URL.createObjectURL(file);
+                const img = new Image();
+                img.onload = () => {
+                    const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+                    const canvas = document.createElement('canvas');
+                    canvas.width = Math.round(img.width * scale);
+                    canvas.height = Math.round(img.height * scale);
+                    const ctx = canvas.getContext('2d');
+                    ctx.fillStyle = '#fff';  // 透明背景的 PNG 變白底
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                    URL.revokeObjectURL(url);
+                    resolve(canvas.toDataURL('image/jpeg', 0.82));
+                };
+                img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('無法讀取這個圖片檔')); };
+                img.src = url;
+            });
+        }
+
+        async function uploadProductImage(file) {
+            if (!file || !imageTargetIds.length) return;
+            const names = products.filter(p => imageTargetIds.includes(p.id)).map(p => `${p.series}-${p.name}`);
+            if (imageTargetIds.length > 1 && !confirm(`這張圖片要套用到 ${names.length} 個商品？\n\n${names.slice(0, 10).join('\n')}${names.length > 10 ? '\n…' : ''}`)) return;
+            try {
+                const image = await resizeImage(file);
+                const result = await postJson('/api/admin/products/image', { ids: imageTargetIds, image });
+                if (imageTargetIds.length > 1) alert(result.message);
+                loadInventory();
+            } catch (error) {
+                alert('上傳失敗: ' + error.message);
+            }
+        }
+
+        async function removeProductImage(ids) {
+            if (!ids.length) return;
+            if (!confirm(`確定要移除 ${ids.length} 個商品的圖片？`)) return;
+            try {
+                await postJson('/api/admin/products/image/delete', { ids });
+                loadInventory();
+            } catch (error) {
+                alert('移除失敗: ' + error.message);
+            }
         }
 
         // ---- 調整商品順序：拖拉 ⠿（電腦）或 ▲▼（平板），只能在同一個大分類裡移動 ----
@@ -1406,7 +1479,7 @@
                 setTimeout(() => input.classList.remove('saved'), 1000);
 
                 // 更新這一列的合計和分類小計
-                const totalCell = input.closest('tr').children[5];
+                const totalCell = input.closest('tr').children[6];
                 totalCell.outerHTML = stockCell(p.gaoxiong + p.taizhong);
                 refreshGroupHeaders();
                 // 上面表單正在修改這個商品的話，同步數字
