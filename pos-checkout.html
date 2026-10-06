@@ -95,7 +95,8 @@
         .series-heading { grid-column: 1 / -1; font-size: 15px; font-weight: bold; color: #555; padding: 6px 2px 0; border-bottom: 2px solid #eee; margin-top: 4px; }
 
         /* ===== 購物車（清單式排版）===== */
-        .cart-panel { padding: 0; background: white; }
+        /* 購物車固定一個螢幕高、跟著畫面停住；商品多了只有中間清單自己捲動 */
+        .cart-panel { padding: 0; background: white; position: sticky; top: 0; height: 100vh; height: 100dvh; align-self: flex-start; overflow: hidden; }
         .cart-head { display: flex; align-items: center; padding: 14px 16px; border-bottom: 1px solid #eee; }
         .cart-title { flex: 1; text-align: center; font-size: 17px; font-weight: bold; color: #333; }
         .cart-title span { font-weight: normal; color: #888; font-size: 14px; }
@@ -149,7 +150,8 @@
         .cust-info { background: #f7f8ff; border-radius: 8px; padding: 12px 14px; font-size: 14px; line-height: 1.8; }
         .cust-buttons { display: flex; gap: 8px; align-items: center; }
         .cust-buttons .checkout-btn { flex: 1; }
-        .cart-items { flex: 1; overflow-y: auto; background: #f7f7f7; padding: 4px 12px; min-height: 120px; }
+        .cart-items { flex: 1 1 0; overflow-y: auto; background: #f7f7f7; padding: 4px 12px; min-height: 60px; }
+        .cart-head, .cart-panel > .cart-row, .cart-bottom { flex-shrink: 0; }
         .cart-empty { color: #aaa; text-align: center; padding: 40px 0; font-size: 14px; }
         .cart-bottom { border-top: 1px solid #eee; }
         .discount-amt { color: #e03131; font-weight: bold; }
