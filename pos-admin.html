@@ -170,7 +170,7 @@
             <div class="section">
                 <h3>👥 員工與打卡密碼</h3>
                 <table id="staffTable2">
-                    <thead><tr><th>員工</th><th>門市</th><th>打卡密碼</th><th>設定新密碼</th><th></th></tr></thead>
+                    <thead><tr><th class="sort-col">排序</th><th>員工</th><th>門市</th><th>打卡密碼</th><th>設定新密碼</th><th></th></tr></thead>
                     <tbody></tbody>
                 </table>
                 <div class="input-group">
@@ -711,8 +711,16 @@
                     </tr>`).join('') : '<tr><td colspan="4" style="color:#999">還沒有登記任何門市裝置</td></tr>';
 
                 const staff = (await api('/api/admin/staff')).data;
-                document.querySelector('#staffTable2 tbody').innerHTML = staff.map(s => `
-                    <tr>
+                staffOrder = staff.map(s => s.name);
+                document.querySelector('#staffTable2 tbody').innerHTML = staff.map((s, i) => `
+                    <tr data-staff-index="${i}" ondragover="dragOverStaff(event, ${i})"
+                        ondragleave="this.classList.remove('drop-above', 'drop-below')" ondrop="dropStaff(event, ${i})">
+                        <td class="sort-cell">
+                            <span class="drag-handle" draggable="true" title="拖拉調整順序"
+                                  ondragstart="dragStartStaff(event, ${i})" ondragend="dragEndStaff()">⠿</span>
+                            <button class="move-btn" title="往上移" onclick="moveStaff(${i}, -1)">▲</button>
+                            <button class="move-btn" title="往下移" onclick="moveStaff(${i}, 1)">▼</button>
+                        </td>
                         <td>${escHtml(s.name)}</td>
                         <td><select data-staff="${escHtml(s.name)}" onchange="setStaffStore(this)">
                             ${[['', '兩店都有'], ['高雄', '高雄'], ['台中', '台中']].map(([v, label]) =>
@@ -770,6 +778,65 @@
             } catch (error) {
                 alert('設定失敗: ' + error.message);
             }
+        }
+
+        // ---- 員工順序：拖拉 ⠿ 或 ▲▼，前台打卡和銷售人員照這個順序 ----
+        let staffOrder = [];
+        let draggingStaff = null;
+
+        async function saveStaffOrder(names) {
+            staffOrder = names;
+            try {
+                await postJson('/api/admin/staff/reorder', { names });
+            } catch (error) {
+                alert('順序儲存失敗: ' + error.message);
+            }
+            loadPunchSettings();
+        }
+
+        function moveStaffTo(from, to) {
+            if (from === to || to < 0 || to >= staffOrder.length) return;
+            const names = [...staffOrder];
+            const [name] = names.splice(from, 1);
+            names.splice(to, 0, name);
+            saveStaffOrder(names);
+        }
+
+        function moveStaff(i, dir) {
+            moveStaffTo(i, i + dir);
+        }
+
+        function dragStartStaff(event, i) {
+            draggingStaff = i;
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/plain', String(i));
+            event.target.closest('tr').classList.add('dragging');
+        }
+
+        function dragEndStaff() {
+            draggingStaff = null;
+            document.querySelectorAll('#staffTable2 tr').forEach(tr => tr.classList.remove('dragging', 'drop-above', 'drop-below'));
+        }
+
+        function dragOverStaff(event, i) {
+            if (draggingStaff === null || draggingStaff === i) return;
+            event.preventDefault();
+            const tr = event.currentTarget;
+            const before = event.clientY < tr.getBoundingClientRect().top + tr.offsetHeight / 2;
+            tr.classList.toggle('drop-above', before);
+            tr.classList.toggle('drop-below', !before);
+        }
+
+        function dropStaff(event, i) {
+            event.preventDefault();
+            const before = event.currentTarget.classList.contains('drop-above');
+            const from = draggingStaff;
+            dragEndStaff();
+            if (from === null) return;
+            // 放在目標的上面或下面；從上面拖下來時，移除自己後目標位置要往前一格
+            let to = before ? i : i + 1;
+            if (from < to) to--;
+            moveStaffTo(from, to);
         }
 
         // 員工所屬門市：前台打卡和結帳只會列出這家門市的人員
