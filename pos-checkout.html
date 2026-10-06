@@ -93,7 +93,13 @@
         .product-img { width: 100%; height: 110px; object-fit: cover; border-radius: 6px; display: block; background: #f3f3f3; }
         .cart-thumb { width: 42px; height: 42px; object-fit: cover; border-radius: 6px; margin-right: 10px; flex: 0 0 auto; }
         /* 頂端：搜尋商品 / 新增商品 */
-        .header h1 { margin-bottom: 0; }
+        .header h1 { margin-bottom: 0; white-space: nowrap; margin-right: 12px; }
+        /* 購物車很窄（直立平板）時，商品名稱一行、數量按鈕換到下一行 */
+        .cart-item { flex-wrap: wrap; gap: 6px 8px; }
+        .cart-item-info { flex: 1 1 130px; min-width: 0; }
+        .cart-item-total { margin-right: 0; margin-left: auto; white-space: nowrap; }
+        .remove-x { width: 32px; height: 32px; border: none; border-radius: 50%; background: none; color: #adb5bd; font-size: 18px; line-height: 1; cursor: pointer; touch-action: manipulation; }
+        .remove-x:hover, .remove-x:active { background: #ffe3e3; color: #e03131; }
         .header-tools { display: flex; align-items: center; gap: 10px; flex: 0 1 380px; min-width: 0; }
         .header-search { position: relative; flex: 1; min-width: 0; }
         .header-search input { width: 100%; padding: 11px 36px 11px 14px; border: none; border-radius: 22px; font-size: 15px; font-family: inherit; background: rgba(255,255,255,0.95); color: #333; }
@@ -230,6 +236,12 @@
         .preset-chip small { color: #999; margin-left: 4px; }
         .preset-chip.active { background: #e03131; color: white; border-color: #e03131; }
         .preset-chip.active small { color: #ffe3e3; }
+        /* 購物車數量：− 數字 ＋（平板直接按）*/
+        .qty-stepper { display: flex; align-items: center; border: 1px solid #ddd; border-radius: 8px; overflow: hidden; background: white; }
+        .qty-btn { width: 38px; height: 38px; border: none; background: #f1f3f5; color: #667eea; font-size: 22px; font-weight: bold; line-height: 1; cursor: pointer; font-family: inherit; touch-action: manipulation; }
+        .qty-btn:active { background: #dde3ff; }
+        .qty-stepper .qty-input { width: 44px; height: 38px; border: none; border-radius: 0; padding: 0; text-align: center; font-size: 16px; font-weight: bold; -moz-appearance: textfield; }
+        .qty-stepper .qty-input::-webkit-inner-spin-button, .qty-stepper .qty-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
         .preset-empty { font-size: 13px; color: #999; padding: 4px 2px; }
         .preset-chip:disabled { opacity: 0.45; cursor: not-allowed; }
         .staff-select { max-width: 60%; }
@@ -1331,8 +1343,12 @@
                             <div class="cart-item-qty">NT$${item.price} × ${item.qty}</div>
                         </div>
                         <div style="display: flex; gap: 5px; align-items: center;">
-                            <input type="number" class="qty-input" value="${item.qty}" min="1" onchange="updateQty(${item.id}, parseInt(this.value))">
-                            <button class="remove-btn" onclick="removeFromCart(${item.id})">刪</button>
+                            <div class="qty-stepper">
+                                <button class="qty-btn" onclick="updateQty(${item.id}, ${item.qty - 1})" title="減 1">−</button>
+                                <input type="number" class="qty-input" value="${item.qty}" min="1" inputmode="numeric" onchange="updateQty(${item.id}, parseInt(this.value) || 0)">
+                                <button class="qty-btn" onclick="updateQty(${item.id}, ${item.qty + 1})" title="加 1">＋</button>
+                            </div>
+                            <button class="remove-x" onclick="removeFromCart(${item.id})" title="移除這個商品">✕</button>
                         </div>
                         <div class="cart-item-total">NT$${(item.qty * item.price).toLocaleString()}</div>
                     </div>
