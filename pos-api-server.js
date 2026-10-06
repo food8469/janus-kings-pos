@@ -82,6 +82,12 @@ async function initDb() {
     -- 商品圖片（壓縮後的 JPEG，存成 data URL）；image_version 用來讓瀏覽器換新圖
     ALTER TABLE products ADD COLUMN IF NOT EXISTS image TEXT;
     ALTER TABLE products ADD COLUMN IF NOT EXISTS image_version INTEGER NOT NULL DEFAULT 0;
+    -- 前台圖卡圖片：key = 'cat:分類' 或 'series:分類|系列'
+    CREATE TABLE IF NOT EXISTS tile_images (
+      key     TEXT PRIMARY KEY,
+      image   TEXT NOT NULL,
+      version INTEGER NOT NULL DEFAULT 1
+    );
     -- 同一次結帳的品項共用一個單號
     ALTER TABLE sales ADD COLUMN IF NOT EXISTS order_no TEXT;
     -- 整單折扣分到這一項的金額（total 已扣掉）
@@ -225,6 +231,41 @@ app.get('/api/products/:id/image', async (req, res) => {
   if (!m) return res.status(404).end();
   res.set('Cache-Control', 'public, max-age=31536000, immutable');
   res.type(m[1]).send(Buffer.from(m[2], 'base64'));
+});
+
+// ============ 前台圖卡圖片（分類卡、系列卡）============
+const isImageData = (s) => /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(s);
+
+// 有哪些圖卡有圖：{ key: version }
+app.get('/api/tile-images', requireDevice, async (req, res) => {
+  const { rows } = await pool.query('SELECT key, version FROM tile_images');
+  res.json({ status: 'success', data: Object.fromEntries(rows.map(r => [r.key, r.version])) });
+});
+
+// 圖卡圖片（公開，網址帶 ?v= 版本號，瀏覽器可以長期快取）
+app.get('/api/tile-image', async (req, res) => {
+  const { rows: [t] } = await pool.query('SELECT image FROM tile_images WHERE key = $1', [String(req.query.key || '')]);
+  const m = t && t.image.match(/^data:(image\/(?:jpeg|png|webp));base64,(.+)$/);
+  if (!m) return res.status(404).end();
+  res.set('Cache-Control', 'public, max-age=31536000, immutable');
+  res.type(m[1]).send(Buffer.from(m[2], 'base64'));
+});
+
+app.post('/api/admin/tile-images', requireAdmin, async (req, res) => {
+  const key = String(req.body?.key || '').slice(0, 200);
+  const image = String(req.body?.image || '');
+  if (!/^(cat|series):./.test(key)) return res.status(400).json({ status: 'error', message: '圖卡錯誤' });
+  if (!isImageData(image)) return res.status(400).json({ status: 'error', message: '圖片格式錯誤' });
+  if (image.length > 2_000_000) return res.status(400).json({ status: 'error', message: '圖片太大' });
+  await pool.query(
+    `INSERT INTO tile_images (key, image) VALUES ($1, $2)
+     ON CONFLICT (key) DO UPDATE SET image = EXCLUDED.image, version = tile_images.version + 1`, [key, image]);
+  res.json({ status: 'success', message: '已更新圖片' });
+});
+
+app.post('/api/admin/tile-images/delete', requireAdmin, async (req, res) => {
+  await pool.query('DELETE FROM tile_images WHERE key = $1', [String(req.body?.key || '')]);
+  res.json({ status: 'success', message: '已移除圖片' });
 });
 
 // 後台：上傳圖片，可以一次套用到好幾個商品（同一口味的不同重量）

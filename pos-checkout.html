@@ -568,9 +568,10 @@
         async function loadProducts() {
             const seriesView = document.getElementById('seriesView');
             try {
-                const res = await posFetch(`/api/inventory`);
+                const [res, tilesRes] = await Promise.all([posFetch(`/api/inventory`), posFetch(`/api/tile-images`).catch(() => null)]);
                 const data = await res.json();
                 if (!res.ok) throw new Error(data.message || res.status);
+                tileImages = tilesRes && tilesRes.ok ? (await tilesRes.json()).data || {} : {};
 
                 // 依大分類 + 系列分組，只顯示上架中的商品
                 seriesData = [];
@@ -581,8 +582,7 @@
                         groups[key] = { category: p.category, name: p.series, items: [] };
                         seriesData.push(groups[key]);
                     }
-                    groups[key].items.push({ id: p.id, name: p.name, series: p.series, price: p.price, gaoxiong: p.gaoxiong, taizhong: p.taizhong,
-                        image: p.has_image ? `${API_URL()}/api/products/${p.id}/image?v=${p.image_version}` : null });
+                    groups[key].items.push({ id: p.id, name: p.name, series: p.series, price: p.price, gaoxiong: p.gaoxiong, taizhong: p.taizhong });
                 });
                 renderSeriesView();
 
@@ -683,7 +683,7 @@
                 tabs.appendChild(btn);
             });
 
-            const seriesTile = (series) => makeTile(series.items.find(i => i.image)?.image, series.name,
+            const seriesTile = (series) => makeTile(tileUrl(`series:${series.category}|${series.name}`), series.name,
                 `${series.items.length} 個品項`, () => selectSeries(series));
 
             // 一般分類直接顯示口味；一般分類直接顯示口味；DRILL_CATEGORIES 的分類先顯示一張分類卡
@@ -698,11 +698,10 @@
                 catOrder.filter(c => groupOf(c) === group).forEach(category => {
                     const ofCategory = list.filter(s => s.category === category);
                     if (DRILL_CATEGORIES.includes(category)) {
-                        const cover = ofCategory.flatMap(s => s.items).find(i => i.image);
-                        seriesView.appendChild(makeTile(cover?.image, category, `${ofCategory.length} 種口味`, () => openDrill(category)));
+                        seriesView.appendChild(makeTile(tileUrl(`cat:${category}`), category, `${ofCategory.length} 種口味`, () => openDrill(category)));
                     } else if (SINGLE_TILE_CATEGORIES.includes(category)) {
                         const merged = mergedSeries(category);
-                        seriesView.appendChild(makeTile(merged.items.find(i => i.image)?.image, category,
+                        seriesView.appendChild(makeTile(tileUrl(`cat:${category}`), category,
                             `${merged.items.length} 個品項`, () => selectSeries(mergedSeries(category))));
                     } else {
                         ofCategory.forEach(s => seriesView.appendChild(seriesTile(s)));
@@ -720,6 +719,11 @@
 
         // 這些分類只顯示一張卡，點進去一次列出整個分類的品項（例如試吃：鹽味、紅酒…）
         const SINGLE_TILE_CATEGORIES = ['試吃'];
+
+        // 前台圖卡圖片（後台庫存管理設定）：key = 'cat:分類' 或 'series:分類|系列'
+        let tileImages = {};   // { key: version }
+        const tileUrl = (key) => tileImages[key]
+            ? `${API_URL()}/api/tile-image?key=${encodeURIComponent(key)}&v=${tileImages[key]}` : null;
 
         // 把一個分類的所有系列合成一個「系列」：品項名稱用口味（系列名），同一口味有多個品項時再加上品名
         function mergedSeries(category) {
@@ -1048,7 +1052,6 @@
 
                 cartDiv.innerHTML += `
                     <div class="cart-item">
-                        ${item.image ? `<img class="cart-thumb" src="${item.image}" alt="">` : ''}
                         <div class="cart-item-info">
                             <div class="cart-item-name">${item.series ? esc(item.series) + ' ' : ''}${esc(item.name)}</div>
                             <div class="cart-item-qty">NT$${item.price} × ${item.qty}</div>

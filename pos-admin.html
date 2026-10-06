@@ -48,6 +48,9 @@
         .thumb { width: 44px; height: 44px; border: 1px dashed #ccc; border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer; overflow: hidden; background: #fafafa; font-size: 18px; }
         .thumb:hover { border-color: #667eea; }
         .thumb img { width: 100%; height: 100%; object-fit: cover; }
+        .thumb.small { display: inline-flex; width: 36px; height: 36px; vertical-align: middle; margin-right: 10px; font-size: 15px; }
+        button.thumb-remove { padding: 0 5px; font-size: 11px; background: white; color: #999; border: 1px solid #ddd; margin-right: 10px; vertical-align: middle; }
+        tr.series-row td { background: #fafbff; padding-top: 6px; padding-bottom: 6px; color: #4c5bd4; }
         button.collapse-btn { background: none; color: #4c5bd4; border: none; font-size: 16px; padding: 2px 8px; }
         button.collapse-btn:hover { background: #dde3ff; }
         td.group-title { cursor: pointer; user-select: none; }
@@ -264,8 +267,6 @@
                     <button id="saveSelectionBtn" onclick="saveSelection()">💾 保存修改</button>
                     <button class="secondary" onclick="batchSetActive(true)">上架</button>
                     <button class="secondary" onclick="batchSetActive(false)">下架</button>
-                    <button class="secondary" onclick="pickProductImage([...checkedIds])">🖼️ 上傳圖片</button>
-                    <button class="secondary" onclick="removeProductImage([...checkedIds])">移除圖片</button>
                     <button class="danger" onclick="batchDelete()">🗑️ 刪除</button>
                     <button class="secondary" onclick="clearChecks()">取消勾選</button>
                 </span>
@@ -279,7 +280,7 @@
 
             <table id="inventoryTable">
                 <thead>
-                    <tr><th class="sort-col" title="拖拉 ⠿ 或按 ▲▼ 調整順序">排序</th><th class="check-col"><input type="checkbox" id="checkAll" title="全選" onchange="toggleChecks(visibleIds(), this.checked)"></th><th>圖片</th><th>商品</th><th>高雄</th><th>台中</th><th>合計</th><th>單價</th><th>狀態</th></tr>
+                    <tr><th class="sort-col" title="拖拉 ⠿ 或按 ▲▼ 調整順序">排序</th><th class="check-col"><input type="checkbox" id="checkAll" title="全選" onchange="toggleChecks(visibleIds(), this.checked)"></th><th>商品</th><th>高雄</th><th>台中</th><th>合計</th><th>單價</th><th>狀態</th></tr>
                 </thead>
                 <tbody></tbody>
             </table>
@@ -1047,7 +1048,9 @@
 
         async function loadInventory() {
             try {
-                products = (await api('/api/inventory')).data;
+                const [inv, tiles] = await Promise.all([api('/api/inventory'), api('/api/tile-images').catch(() => ({ data: {} }))]);
+                products = inv.data;
+                tileImages = tiles.data || {};
             } catch (error) {
                 alert('載入庫存失敗: ' + error.message);
                 return;
@@ -1080,7 +1083,7 @@
             const tbody = document.querySelector('#inventoryTable tbody');
             tbody.innerHTML = groups
                 .filter(g => !inventoryFilter || g.category === inventoryFilter)
-                .map(g => inventoryGroupRow(g) + g.items.map(p => `
+                .map(g => inventoryGroupRow(g) + g.items.map((p, i) => seriesRowIfNeeded(g, p, i) + `
                     <tr class="${p.active ? '' : 'inactive'}" data-id="${p.id}" data-cat="${escHtml(p.category)}" ${collapsedCategories.has(p.category) ? 'hidden' : ''}
                         ondragover="dragOverProduct(event, ${p.id})" ondragleave="this.classList.remove('drop-above', 'drop-below')" ondrop="dropProduct(event, ${p.id})">
                         <td class="sort-cell">
@@ -1090,8 +1093,6 @@
                             <button class="move-btn" title="往下移" onclick="moveProduct(${p.id}, 1)">▼</button>
                         </td>
                         <td><input type="checkbox" class="row-check" data-id="${p.id}" onchange="toggleChecks([${p.id}], this.checked)"></td>
-                        <td><div class="thumb" title="${p.has_image ? '點一下換圖片' : '點一下上傳圖片'}" onclick="pickProductImage([${p.id}])">
-                            ${p.has_image ? `<img src="/api/products/${p.id}/image?v=${p.image_version}" alt="">` : '📷'}</div></td>
                         <td>${p.series}-${p.name}</td>
                         ${cell(p, 'gaoxiong')}
                         ${cell(p, 'taizhong')}
@@ -1271,11 +1272,72 @@
         // 庫存表的大分類標題列（多一個勾選框，可勾整個分類）
         function inventoryGroupRow(g) {
             const collapsed = collapsedCategories.has(g.category);
-            return groupHeaderRow(g, 7).replace('<td colspan="7">',
+            return groupHeaderRow(g, 6).replace('<td colspan="6">',
                 `<td><button class="collapse-btn" title="收合 / 展開" onclick="toggleCategory(this.closest('tr').dataset.category)">${collapsed ? '▸' : '▾'}</button></td>
                  <td><input type="checkbox" class="group-check" data-category="${g.category}"
                     onchange="toggleChecks(products.filter(p => p.category === this.dataset.category).map(p => p.id), this.checked)"></td>
-                 <td colspan="7" class="group-title" onclick="toggleCategory(this.closest('tr').dataset.category)">`);
+                 <td colspan="6" class="group-title" onclick="toggleCategory(this.closest('tr').dataset.category)">
+                 ${TILE_CATEGORIES.includes(g.category) ? tileThumb(`cat:${g.category}`, `${g.category} 的前台圖卡`) : ''}`);
+        }
+
+        // ============ 前台圖卡圖片 ============
+        // 這些分類在前台是「整個分類一張卡」→ 圖片放在大分類標題列；
+        // 其他分類（例如一口吃）前台是「每個系列一張卡」→ 圖片放在系列小標題。要和前台 pos-checkout 的設定一致
+        const TILE_CATEGORIES = ['整片系列', '頂規整片', '試吃'];
+        let tileImages = {};   // { key: version }
+
+        function tileThumb(key, title) {
+            const v = tileImages[key];
+            return `<span class="thumb small" title="${escHtml(title)}：${v ? '點一下換圖片' : '點一下上傳圖片'}"
+                onclick="event.stopPropagation(); pickTileImage(this.dataset.key)" data-key="${escHtml(key)}">
+                ${v ? `<img src="/api/tile-image?key=${encodeURIComponent(key)}&v=${v}" alt="">` : '📷'}</span>
+                ${v ? `<button class="thumb-remove" title="移除圖片" onclick="event.stopPropagation(); removeTileImage(this.previousElementSibling.dataset.key)">✕</button>` : ''}`;
+        }
+
+        // 一口吃這類分類：每個系列第一次出現時插入一列系列小標題（可放圖）
+        function seriesRowIfNeeded(g, p, i) {
+            if (TILE_CATEGORIES.includes(g.category)) return '';
+            if (g.items.findIndex(x => x.series === p.series) !== i) return '';
+            return `<tr class="series-row" data-cat="${escHtml(g.category)}" ${collapsedCategories.has(g.category) ? 'hidden' : ''}>
+                <td></td><td></td>
+                <td colspan="6">${tileThumb(`series:${g.category}|${p.series}`, `${p.series} 的前台圖卡`)}<b>${escHtml(p.series)}</b></td>
+            </tr>`;
+        }
+
+        let tileTargetKey = null;
+        function pickTileImage(key) {
+            tileTargetKey = key;
+            let input = document.getElementById('tileImageFile');
+            if (!input) {
+                input = document.createElement('input');
+                input.type = 'file';
+                input.accept = 'image/*';
+                input.id = 'tileImageFile';
+                input.hidden = true;
+                input.onchange = () => { uploadTileImage(input.files[0]); input.value = ''; };
+                document.body.appendChild(input);
+            }
+            input.click();
+        }
+
+        async function uploadTileImage(file) {
+            if (!file || !tileTargetKey) return;
+            try {
+                await postJson('/api/admin/tile-images', { key: tileTargetKey, image: await resizeImage(file) });
+                loadInventory();
+            } catch (error) {
+                alert('上傳失敗: ' + error.message);
+            }
+        }
+
+        async function removeTileImage(key) {
+            if (!confirm('確定要移除這張圖片？')) return;
+            try {
+                await postJson('/api/admin/tile-images/delete', { key });
+                loadInventory();
+            } catch (error) {
+                alert('移除失敗: ' + error.message);
+            }
         }
 
         // ---- 大分類收合 / 展開（記在這台瀏覽器）----
@@ -1306,24 +1368,6 @@
             applyCollapsed();
         }
 
-        // ---- 商品圖片：選檔 → 瀏覽器先縮小壓縮 → 上傳（可一次套用到多個商品）----
-        let imageTargetIds = [];
-
-        function pickProductImage(ids) {
-            if (!ids.length) { alert('請先勾選商品'); return; }
-            imageTargetIds = ids;
-            let input = document.getElementById('productImageFile');
-            if (!input) {
-                input = document.createElement('input');
-                input.type = 'file';
-                input.accept = 'image/*';
-                input.id = 'productImageFile';
-                input.hidden = true;
-                input.onchange = () => { uploadProductImage(input.files[0]); input.value = ''; };
-                document.body.appendChild(input);
-            }
-            input.click();
-        }
 
         // 縮成最長邊 600px 的 JPEG（手機照片幾 MB → 約 50KB）
         function resizeImage(file, maxSize = 600) {
@@ -1345,31 +1389,6 @@
                 img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('無法讀取這個圖片檔')); };
                 img.src = url;
             });
-        }
-
-        async function uploadProductImage(file) {
-            if (!file || !imageTargetIds.length) return;
-            const names = products.filter(p => imageTargetIds.includes(p.id)).map(p => `${p.series}-${p.name}`);
-            if (imageTargetIds.length > 1 && !confirm(`這張圖片要套用到 ${names.length} 個商品？\n\n${names.slice(0, 10).join('\n')}${names.length > 10 ? '\n…' : ''}`)) return;
-            try {
-                const image = await resizeImage(file);
-                const result = await postJson('/api/admin/products/image', { ids: imageTargetIds, image });
-                if (imageTargetIds.length > 1) alert(result.message);
-                loadInventory();
-            } catch (error) {
-                alert('上傳失敗: ' + error.message);
-            }
-        }
-
-        async function removeProductImage(ids) {
-            if (!ids.length) return;
-            if (!confirm(`確定要移除 ${ids.length} 個商品的圖片？`)) return;
-            try {
-                await postJson('/api/admin/products/image/delete', { ids });
-                loadInventory();
-            } catch (error) {
-                alert('移除失敗: ' + error.message);
-            }
         }
 
         // ---- 調整商品順序：拖拉 ⠿（電腦）或 ▲▼（平板），只能在同一個大分類裡移動 ----
@@ -1479,7 +1498,7 @@
                 setTimeout(() => input.classList.remove('saved'), 1000);
 
                 // 更新這一列的合計和分類小計
-                const totalCell = input.closest('tr').children[6];
+                const totalCell = input.closest('tr').children[5];
                 totalCell.outerHTML = stockCell(p.gaoxiong + p.taizhong);
                 refreshGroupHeaders();
                 // 上面表單正在修改這個商品的話，同步數字
