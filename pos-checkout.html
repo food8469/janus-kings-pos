@@ -230,6 +230,7 @@
         .preset-chip small { color: #999; margin-left: 4px; }
         .preset-chip.active { background: #e03131; color: white; border-color: #e03131; }
         .preset-chip.active small { color: #ffe3e3; }
+        .preset-empty { font-size: 13px; color: #999; padding: 4px 2px; }
         .preset-chip:disabled { opacity: 0.45; cursor: not-allowed; }
         .staff-select { max-width: 60%; }
         .small-btn { padding: 8px 12px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; white-space: nowrap; font-family: inherit; }
@@ -363,21 +364,11 @@
 
                 <!-- 整單折扣 -->
                 <div class="cart-row clickable" id="discountRow" onclick="editDiscount()">
-                    <span><span class="row-icon">🏷️</span><span id="discountLabel">新增整單折扣</span></span>
+                    <span><span class="row-icon">🏷️</span><span id="discountLabel">折扣</span></span>
                     <span id="discountAmount" class="discount-amt"></span>
                 </div>
                 <!-- 後台設定的優惠，點一下套用 -->
                 <div class="discount-presets" id="discountPresets" hidden></div>
-                <div class="cart-row discount-edit" id="discountEdit" hidden>
-                    <select id="discountType" onchange="updateDiscountPlaceholder()">
-                        <option value="amount">減金額</option>
-                        <option value="percent">打折</option>
-                    </select>
-                    <input type="number" id="discountValue" min="0" step="any" placeholder="例：100"
-                           onkeydown="if (event.key === 'Enter') applyDiscount()">
-                    <button class="small-btn" onclick="applyDiscount()">套用</button>
-                    <button class="small-btn ghost" onclick="clearDiscount()">移除</button>
-                </div>
 
                 <!-- 銷售人員：點了跳出「誰來結帳」選人（下拉選單藏起來，存名單和選到的人） -->
                 <div class="cart-row clickable" onclick="openStaffPicker()">
@@ -1176,7 +1167,7 @@
                             </div>
                             ${o.lines.map(l => `
                                 <div class="order-line"><span>${esc(l.product_name)} × ${l.quantity}</span><span>NT$${(l.price * l.quantity).toLocaleString()}</span></div>`).join('')}
-                            ${o.discount ? `<div class="order-line" style="color:#e03131"><span>整單折扣</span><span>-NT$${o.discount.toLocaleString()}</span></div>` : ''}
+                            ${o.discount ? `<div class="order-line" style="color:#e03131"><span>折扣</span><span>-NT$${o.discount.toLocaleString()}</span></div>` : ''}
                             <div class="order-total"><span>合計</span><span>NT$${o.total.toLocaleString()}</span></div>
                         </div>`).join('')
                     : '<div class="empty">還沒有購買紀錄</div>';
@@ -1243,33 +1234,28 @@
             }
         }
 
-        // ---- 整單折扣：減金額，或打折（9 折填 9、85 折填 85）----
-        let discount = null;   // { type: 'amount' | 'percent', value, name?, min_spend?, id? }
+        // ---- 折扣：點「🏷️ 折扣」列出後台設定的折扣優惠，點一下套用 ----
+        let discount = null;   // { id, name, type: 'amount' | 'percent', value, min_spend }
         let discountPresets = [];   // 後台「折扣優惠」設定的優惠
 
         async function loadDiscountPresets() {
             try {
                 const res = await posFetch('/api/discounts');
                 if (res.ok) discountPresets = (await res.json()).data || [];
-            } catch (e) { /* 載入失敗就只能手動輸入 */ }
+            } catch (e) { /* 網路錯誤，用上次載入的 */ }
         }
 
         function editDiscount() {
-            const edit = document.getElementById('discountEdit');
+            const panel = document.getElementById('discountPresets');
             // 再按一次就收起來
-            if (!edit.hidden) return closeDiscountEdit();
+            if (!panel.hidden) return closeDiscountEdit();
             renderDiscountPresets();
-            document.getElementById('discountPresets').hidden = !discountPresets.length;
-            edit.hidden = false;
-            updateDiscountPlaceholder();
-            loadDiscountPresets().then(() => {
-                renderDiscountPresets();
-                document.getElementById('discountPresets').hidden = edit.hidden || !discountPresets.length;
-            });
+            panel.hidden = false;
+            // 抓最新的優惠（後台可能剛改過）
+            loadDiscountPresets().then(() => { if (!panel.hidden) renderDiscountPresets(); });
         }
 
         function closeDiscountEdit() {
-            document.getElementById('discountEdit').hidden = true;
             document.getElementById('discountPresets').hidden = true;
         }
 
@@ -1278,7 +1264,12 @@
 
         function renderDiscountPresets() {
             const subtotal = subtotalOf();
-            document.getElementById('discountPresets').innerHTML = discountPresets.map(d => {
+            const panel = document.getElementById('discountPresets');
+            if (!discountPresets.length) {
+                panel.innerHTML = '<span class="preset-empty">還沒有折扣優惠，請到後台「🏷️ 折扣優惠」新增</span>';
+                return;
+            }
+            panel.innerHTML = discountPresets.map(d => {
                 const short = d.min_spend && subtotal < d.min_spend;
                 return `<button class="preset-chip ${discount && discount.id === d.id ? 'active' : ''}" ${short ? 'disabled' : ''}
                     onclick="applyPreset(${d.id})" title="${esc(d.note || '')}">
@@ -1296,30 +1287,13 @@
             renderCart();
         }
 
-        function updateDiscountPlaceholder() {
-            const type = document.getElementById('discountType').value;
-            document.getElementById('discountValue').placeholder = type === 'amount' ? '例：100' : '9 折填 9，85 折填 85';
-        }
-
         // 打折數字換成付款比例：9 → 0.9、8.5 → 0.85、85 → 0.85
         function discountRate(v) {
             return v < 10 ? v / 10 : v / 100;
         }
 
-        function applyDiscount() {
-            const type = document.getElementById('discountType').value;
-            const value = Number(document.getElementById('discountValue').value);
-            if (!value || value <= 0) return showMessage('請輸入折扣', 'error');
-            if (type === 'amount' && !Number.isInteger(value)) return showMessage('折扣金額請填整數', 'error');
-            if (type === 'percent' && !(discountRate(value) > 0 && discountRate(value) < 1)) return showMessage('打折請填 1～99，例如 9 折填 9', 'error');
-            discount = { type, value };
-            closeDiscountEdit();
-            renderCart();
-        }
-
         function clearDiscount() {
             discount = null;
-            document.getElementById('discountValue').value = '';
             closeDiscountEdit();
             renderCart();
         }
@@ -1370,8 +1344,8 @@
             const off = discountOf(totalAmount);
             document.getElementById('cartCount').textContent = `(${totalQty}件)`;
             document.getElementById('subtotal').textContent = `NT$${totalAmount.toLocaleString()}`;
-            document.getElementById('discountLabel').textContent = !discount ? '新增整單折扣'
-                : (discount.name ? `${discount.name}（${discountName(discount)}）` : `整單折扣：${discountName(discount)}`)
+            document.getElementById('discountLabel').textContent = !discount ? '折扣'
+                : (discount.name ? `${discount.name}（${discountName(discount)}）` : `折扣：${discountName(discount)}`)
                   + (discount.min_spend && totalAmount < discount.min_spend ? `　未達滿 ${discount.min_spend.toLocaleString()}` : '');
             if (!document.getElementById('discountPresets').hidden) renderDiscountPresets();
             document.getElementById('discountAmount').textContent = off ? `-NT$${off.toLocaleString()}` : '';
@@ -1419,7 +1393,7 @@
                     <div>${i.series && i.series !== i.name ? esc(i.series) + ' ' : ''}${esc(i.name)}<small>${nt(i.price)} × ${i.qty}</small></div>
                     <b>${nt(i.price * i.qty)}</b>
                 </div>`).join('') +
-                (off ? `<div class="pay-line discount"><span>整單折扣</span><b>-${nt(off)}</b></div>` : '');
+                (off ? `<div class="pay-line discount"><span>${discount && discount.name ? esc(discount.name) : '折扣'}</span><b>-${nt(off)}</b></div>` : '');
             document.getElementById('payTotals').innerHTML = `<span>合計（${items.reduce((s, i) => s + i.qty, 0)} 件）</span><span>${nt(total)}</span>`;
 
             updatePayStaff();
@@ -1951,7 +1925,7 @@
                                 <span>${esc(l.product_name)} × ${l.quantity}</span>
                                 <span>NT$${(l.price * l.quantity).toLocaleString()}</span>
                             </div>`).join('')}
-                        ${o.discount ? `<div class="order-line" style="color:#e03131"><span>整單折扣</span><span>-NT$${o.discount.toLocaleString()}</span></div>` : ''}
+                        ${o.discount ? `<div class="order-line" style="color:#e03131"><span>折扣</span><span>-NT$${o.discount.toLocaleString()}</span></div>` : ''}
                         <div class="order-total"><span>合計</span><span>NT$${o.total.toLocaleString()}</span></div>
                     </div>`).join('') : '<div class="empty">今天還沒有交易紀錄</div>';
             } catch (error) {
