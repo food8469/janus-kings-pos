@@ -1359,8 +1359,16 @@
         // 庫存表的大分類標題列（多一個勾選框，可勾整個分類）
         function inventoryGroupRow(g) {
             const collapsed = collapsedCategories.has(g.category);
-            return groupHeaderRow(g, 6).replace('<td colspan="6">',
-                `<td><button class="collapse-btn" title="收合 / 展開" onclick="toggleCategory(this.closest('tr').dataset.category)">${collapsed ? '▸' : '▾'}</button></td>
+            return groupHeaderRow(g, 6).replace('<tr class="group-row"',
+                `<tr class="group-row" ondragover="dragOverCategory(event)" ondragleave="this.classList.remove('drop-above', 'drop-below')" ondrop="dropCategory(event)"`)
+                .replace('<td colspan="6">',
+                `<td class="sort-cell">
+                    <span class="drag-handle" draggable="true" title="拖拉移動整個分類"
+                          ondragstart="dragStartCategory(event)" ondragend="dragEndCategory()">⠿</span>
+                    <button class="move-btn" title="分類往上移" onclick="moveCategory(this.closest('tr').dataset.category, -1)">▲</button>
+                    <button class="move-btn" title="分類往下移" onclick="moveCategory(this.closest('tr').dataset.category, 1)">▼</button>
+                    <button class="collapse-btn" title="收合 / 展開" onclick="toggleCategory(this.closest('tr').dataset.category)">${collapsed ? '▸' : '▾'}</button>
+                 </td>
                  <td><input type="checkbox" class="group-check" data-category="${g.category}"
                     onchange="toggleChecks(products.filter(p => p.category === this.dataset.category).map(p => p.id), this.checked)"></td>
                  <td colspan="6" class="group-title" onclick="toggleCategory(this.closest('tr').dataset.category)">
@@ -1480,6 +1488,58 @@
 
         // 商品顯示名稱：「系列-口味」；系列和口味一樣（例如立體手拿盒）就只寫一次
         const productLabel = (p) => (!p.name || p.series === p.name ? p.series : `${p.series}-${p.name}`);
+
+        // ---- 調整大分類順序：整個分類（連同底下商品）一起移動；前台分類順序也跟著變 ----
+        let draggingCategory = null;
+
+        // 依新的分類順序，把商品重新排好後存檔
+        function saveCategoryOrder(categories) {
+            const groups = groupByCategory(products);
+            saveProductOrder(categories.flatMap(c => (groups.find(g => g.category === c) || { items: [] }).items));
+        }
+
+        function moveCategory(category, dir) {
+            const cats = groupByCategory(products).map(g => g.category);
+            const i = cats.indexOf(category);
+            const j = i + dir;
+            if (i < 0 || j < 0 || j >= cats.length) return;
+            [cats[i], cats[j]] = [cats[j], cats[i]];
+            saveCategoryOrder(cats);
+        }
+
+        function dragStartCategory(event) {
+            draggingCategory = event.target.closest('tr').dataset.category;
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/plain', draggingCategory);
+            event.target.closest('tr').classList.add('dragging');
+        }
+
+        function dragEndCategory() {
+            draggingCategory = null;
+            document.querySelectorAll('#inventoryTable tr').forEach(tr => tr.classList.remove('dragging', 'drop-above', 'drop-below'));
+        }
+
+        function dragOverCategory(event) {
+            const tr = event.currentTarget;
+            if (!draggingCategory || tr.dataset.category === draggingCategory) return;
+            event.preventDefault();
+            const before = event.clientY < tr.getBoundingClientRect().top + tr.offsetHeight / 2;
+            tr.classList.toggle('drop-above', before);
+            tr.classList.toggle('drop-below', !before);
+        }
+
+        function dropCategory(event) {
+            event.preventDefault();
+            const tr = event.currentTarget;
+            const target = tr.dataset.category;
+            const before = tr.classList.contains('drop-above');
+            const moving = draggingCategory;
+            dragEndCategory();
+            if (!moving || moving === target) return;
+            const cats = groupByCategory(products).map(g => g.category).filter(c => c !== moving);
+            cats.splice(cats.indexOf(target) + (before ? 0 : 1), 0, moving);
+            saveCategoryOrder(cats);
+        }
 
         // ---- 調整商品順序：拖拉 ⠿（電腦）或 ▲▼（平板），只能在同一個大分類裡移動 ----
         let draggingId = null;
