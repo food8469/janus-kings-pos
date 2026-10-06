@@ -1146,9 +1146,10 @@ app.post('/api/products/create', requireAdmin, async (req, res) => {
   // 價格沒填當作 0（例如試吃品，只扣庫存不收錢）
   const p = toInt(price, '價格') ?? 0;
 
+  // 同一個大分類裡不能重複；不同大分類可以用一樣的名字（例：經典一口吃、頂規一口吃都有「鹽味」）
   const { rows: [dup] } = await pool.query(
-    'SELECT id FROM products WHERE series = $1 AND name = $2', [s, n]);
-  if (dup) return res.status(400).json({ status: 'error', message: `「${s}-${n}」已經存在` });
+    'SELECT id FROM products WHERE category = $1 AND series = $2 AND name = $3', [c, s, n]);
+  if (dup) return res.status(400).json({ status: 'error', message: `「${c}」裡已經有「${s === n ? s : `${s}-${n}`}」了` });
 
   const { rows: [product] } = await pool.query(
     `INSERT INTO products (id, category, series, name, price, gaoxiong, taizhong, sort_order)
