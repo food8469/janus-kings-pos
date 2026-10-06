@@ -48,6 +48,9 @@ const PRODUCTS = [
 ];
 
 const STORE_KEYS = { '高雄': 'gaoxiong', '台中': 'taizhong' };
+
+// 商品顯示名稱：「系列-口味」；系列和口味一樣（例如立體手拿盒）就只寫一次
+const productLabel = (p) => (!p.name || p.series === p.name ? p.series : `${p.series}-${p.name}`);
 const PAYMENT_METHODS = ['現金', 'LINE Pay', '信用卡'];
 
 async function initDb() {
@@ -337,7 +340,7 @@ app.post('/api/sales/create', requireDevice, async (req, res) => {
       `INSERT INTO sales (product_id, product_name, price, quantity, total, store, staff, customer_name, order_no, discount, customer_id,
                           payment_method, tax_id)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
-      [product.id, `${product.series}-${product.name}`, product.price, qty, product.price * qty - lineDiscount,
+      [product.id, productLabel(product), product.price, qty, product.price * qty - lineDiscount,
        store, staff, (customer_name || '').trim() || '客人', String(order_no || '').slice(0, 40) || null, lineDiscount,
        toInt(req.body?.customer_id, '顧客'),
        PAYMENT_METHODS.includes(req.body?.payment_method) ? req.body.payment_method : null,
@@ -785,7 +788,7 @@ app.post('/api/admin/sales/import', requireAdmin, async (req, res) => {
   const list = Array.isArray(req.body?.sales) ? req.body.sales.slice(0, 10000) : [];
   if (!list.length) return res.status(400).json({ status: 'error', message: '沒有要匯入的資料' });
   const { rows: products } = await pool.query('SELECT id, series, name FROM products');
-  const findProduct = (name) => products.find(p => `${p.series}-${p.name}` === name || p.name === name);
+  const findProduct = (name) => products.find(p => productLabel(p) === name || `${p.series}-${p.name}` === name || p.name === name);
 
   let added = 0, skipped = 0, invalid = 0;
   const client = await pool.connect();
@@ -915,7 +918,7 @@ app.get('/api/staff/stats', requireAdmin, async (req, res) => {
 // 5. 盤點紀錄（目前庫存狀態）
 app.get('/api/stocktake', requireAdmin, async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT id, category, series || '-' || name AS name, gaoxiong, taizhong,
+    `SELECT id, category, CASE WHEN series = name THEN name ELSE series || '-' || name END AS name, gaoxiong, taizhong,
             gaoxiong + taizhong AS total, price
      FROM products ORDER BY sort_order NULLS LAST, id`);
   res.json({ status: 'success', data: rows });

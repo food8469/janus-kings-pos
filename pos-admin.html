@@ -1180,7 +1180,7 @@
                             <button class="move-btn" title="往下移" onclick="moveProduct(${p.id}, 1)">▼</button>
                         </td>
                         <td><input type="checkbox" class="row-check" data-id="${p.id}" onchange="toggleChecks([${p.id}], this.checked)"></td>
-                        <td>${p.series}-${p.name}</td>
+                        <td>${escHtml(productLabel(p))}</td>
                         ${cell(p, 'gaoxiong')}
                         ${cell(p, 'taizhong')}
                         ${stockCell(p.gaoxiong + p.taizhong)}
@@ -1262,7 +1262,7 @@
             form.classList.toggle('editing', !!p);
             form.classList.toggle('batch', n > 1);
             document.getElementById('productFormTitle').textContent =
-                n === 0 ? '➕ 商品' : p ? `✏️ 修改：${p.series}-${p.name}` : `☑️ 已勾選 ${n} 項商品，要一起改成：`;
+                n === 0 ? '➕ 商品' : p ? `✏️ 修改：${productLabel(p)}` : `☑️ 已勾選 ${n} 項商品，要一起改成：`;
             document.getElementById('productFormHint').textContent =
                 n === 0 ? '只填口味/重量就能新增，其他沒填的之後可以補。要修改既有商品，勾選下面表格的商品。'
                 : p ? '改好後按「保存修改」。不改了按「取消勾選」回到新增。'
@@ -1344,7 +1344,7 @@
 
         async function batchDelete() {
             const list = checkedProducts();
-            const names = list.map(p => `${p.series}-${p.name}`);
+            const names = list.map(productLabel);
             const preview = names.slice(0, 10).join('\n') + (names.length > 10 ? `\n…等 ${names.length} 項` : '');
             if (!confirm(`確定要刪除這 ${list.length} 項商品？刪除後無法復原（過去的銷售紀錄會保留）。\n\n${preview}`)) return;
             let failed = 0;
@@ -1477,6 +1477,9 @@
                 img.src = url;
             });
         }
+
+        // 商品顯示名稱：「系列-口味」；系列和口味一樣（例如立體手拿盒）就只寫一次
+        const productLabel = (p) => (!p.name || p.series === p.name ? p.series : `${p.series}-${p.name}`);
 
         // ---- 調整商品順序：拖拉 ⠿（電腦）或 ▲▼（平板），只能在同一個大分類裡移動 ----
         let draggingId = null;
@@ -1660,7 +1663,7 @@
                     gaoxiong: val('newGaoxiong'),
                     taizhong: val('newTaizhong')
                 });
-                alert(`已新增「${p.category} / ${p.series}-${p.name}」，前台重新整理後就會出現`);
+                alert(`已新增「${p.category} / ${productLabel(p)}」，前台重新整理後就會出現`);
                 Object.keys(FORM_FIELDS).forEach(id => document.getElementById(id).value = '');
                 loadInventory();
             } catch (error) {
