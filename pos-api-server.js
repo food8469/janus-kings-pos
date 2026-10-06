@@ -826,7 +826,7 @@ app.post('/api/products/create', requireAdmin, async (req, res) => {
   const { category, series, name, price, gaoxiong, taizhong } = req.body || {};
   // 只有品名必填；沒填的欄位給預設值，之後可在後台修改
   const n = String(name || '').trim() || String(series || '').trim();
-  if (!n) return res.status(400).json({ status: 'error', message: '請至少填品名' });
+  if (!n) return res.status(400).json({ status: 'error', message: '請至少填口味/重量' });
   const s = String(series || '').trim() || n;
   const c = String(category || '').trim() || '未分類';
   // 價格沒填當作 0（例如試吃品，只扣庫存不收錢）

@@ -246,7 +246,7 @@
                     </select>
                     <input type="text" id="newCategory" placeholder="大分類（例：試吃）" list="categoryList">
                     <input type="text" id="newSeries" placeholder="系列（例：試吃包）" list="seriesList">
-                    <input type="text" id="newName" placeholder="品名（例：鹽味）">
+                    <input type="text" id="newName" placeholder="口味/重量（例：鹽味、五兩）">
                     <input type="number" id="newPrice" placeholder="價格">
                     <input type="number" id="newGaoxiong" placeholder="高雄庫存">
                     <input type="number" id="newTaizhong" placeholder="台中庫存">
@@ -1161,15 +1161,15 @@
             document.getElementById('productFormTitle').textContent =
                 n === 0 ? '➕ 商品' : p ? `✏️ 修改：${p.series}-${p.name}` : `☑️ 已勾選 ${n} 項商品，要一起改成：`;
             document.getElementById('productFormHint').textContent =
-                n === 0 ? '只填品名就能新增，其他沒填的之後可以補。要修改既有商品，勾選下面表格的商品。'
+                n === 0 ? '只填口味/重量就能新增，其他沒填的之後可以補。要修改既有商品，勾選下面表格的商品。'
                 : p ? '改好後按「保存修改」。不改了按「取消勾選」回到新增。'
-                : '空白的欄位不會改。例：只填「高雄庫存 20」→ 勾選的商品高雄庫存都變 20。品名不能一起改。';
+                : '空白的欄位不會改。例：只填「高雄庫存 20」→ 勾選的商品高雄庫存都變 20。口味/重量不能一起改。';
             document.getElementById('createButtons').hidden = n > 0;
             document.getElementById('editButtons').hidden = n === 0;
             document.getElementById('saveSelectionBtn').textContent = n > 1 ? `✅ 套用到 ${n} 項商品` : '💾 保存修改';
             document.getElementById('batchStockMode').hidden = n < 2;
             document.getElementById('newName').disabled = n > 1;
-            document.getElementById('newName').placeholder = n > 1 ? '（多項時不能改品名）' : '品名（例：鹽味）';
+            document.getElementById('newName').placeholder = n > 1 ? '（多項時不能改口味/重量）' : '口味/重量（例：鹽味、五兩）';
         }
 
         // 勾 1 項 = 直接改那個商品；勾多項 = 批次套用
@@ -1431,7 +1431,7 @@
         async function createProduct() {
             const val = (id) => document.getElementById(id).value.trim();
             if (!val('newName') && !val('newSeries')) {
-                alert('請至少填品名');
+                alert('請至少填口味/重量');
                 return;
             }
             try {
