@@ -1301,21 +1301,22 @@
         const subtotalOf = () => Object.values(cart).reduce((sum, i) => sum + i.qty * i.price, 0);
         const discountName = (d) => d.type === 'custom' ? '自己輸入金額' : d.type === 'amount' ? `減 NT$${d.value.toLocaleString()}` : `${d.value} 折`;
 
+        // 後台的優惠 + 一定有的「✏️ 自訂折扣」（後台已經有「自己輸入金額」的優惠就不重複加）
+        const BUILTIN_CUSTOM = { id: -1, name: '✏️ 自訂折扣', type: 'custom', value: 0, min_spend: 0 };
+        const allPresets = () => discountPresets.some(d => d.type === 'custom')
+            ? discountPresets : [...discountPresets, BUILTIN_CUSTOM];
+
         function renderDiscountPresets() {
             const subtotal = subtotalOf();
             const panel = document.getElementById('discountPresets');
-            if (!discountPresets.length) {
-                panel.innerHTML = '<span class="preset-empty">還沒有折扣優惠，請到後台「🏷️ 折扣優惠」新增</span>';
-                return;
-            }
-            panel.innerHTML = discountPresets.map(d => {
+            panel.innerHTML = allPresets().map(d => {
                 const short = d.min_spend && subtotal < d.min_spend;
                 return `<button class="preset-chip ${discount && discount.id === d.id ? 'active' : ''}" ${short ? 'disabled' : ''}
                     onclick="applyPreset(${d.id})" title="${esc(d.note || '')}">
                     ${esc(d.name)}<small>${discountName(d)}${d.min_spend ? `・滿${d.min_spend.toLocaleString()}` : ''}</small></button>`;
             }).join('');
             // 「結帳時自己輸入金額」的優惠：點了之後在下面輸入要折多少
-            const custom = discountPresets.find(d => d.id === customPresetId);
+            const custom = allPresets().find(d => d.id === customPresetId);
             if (custom) {
                 panel.insertAdjacentHTML('beforeend', `
                     <div class="custom-discount">
@@ -1332,7 +1333,7 @@
         let customPresetId = null;   // 正在輸入金額的「自己輸入」優惠
 
         function applyPreset(id) {
-            const d = discountPresets.find(x => x.id === id);
+            const d = allPresets().find(x => x.id === id);
             if (!d) return;
             // 再點一次同一個優惠 = 取消
             if (discount && discount.id === id) { customPresetId = null; return clearDiscount(); }
@@ -1347,7 +1348,7 @@
         }
 
         function applyCustomDiscount() {
-            const d = discountPresets.find(x => x.id === customPresetId);
+            const d = allPresets().find(x => x.id === customPresetId);
             const value = Number(document.getElementById('customDiscountValue').value);
             if (!d) return;
             if (!Number.isInteger(value) || value <= 0) return showMessage('折扣金額請填大於 0 的整數', 'error');
