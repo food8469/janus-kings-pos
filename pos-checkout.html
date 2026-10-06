@@ -83,9 +83,11 @@
         .tile-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
         .tile-img span { color: white; font-size: 26px; font-weight: bold; letter-spacing: 2px; padding: 0 10px; line-height: 1.3; }
         .tile-label { padding: 12px 8px 14px; }
-        .drill-bar { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; font-size: 18px; font-weight: bold; color: #333; }
-        .drill-back { background: white; border: 1px solid #ddd; border-radius: 18px; padding: 6px 14px; font-size: 15px; cursor: pointer; font-family: inherit; }
-        .drill-back:hover { border-color: #667eea; color: #667eea; }
+        .modal-back { background: #f1f3f5; border: none; border-radius: 50%; width: 34px; height: 34px; font-size: 22px; line-height: 1; cursor: pointer; color: #555; }
+        .modal-back:hover { background: #e5e7ff; color: #667eea; }
+        .flavor-card { padding: 22px 10px; }
+        .flavor-card .product-name { font-size: 18px; margin: 0 0 4px; }
+        .flavor-count { font-size: 12px; color: #999; }
         #seriesView .series-card .tile-label h3 { font-size: 15px; font-weight: 600; margin: 0; color: #333; }
         #seriesView .series-card .tile-label p { font-size: 12px; color: #999; margin-top: 4px; opacity: 1; }
         .product-img { width: 100%; height: 110px; object-fit: cover; border-radius: 6px; display: block; background: #f3f3f3; }
@@ -233,7 +235,10 @@
             <div id="itemModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5); z-index: 999; padding: 20px;">
                 <div style="background: white; border-radius: 8px; padding: 20px; max-height: 80vh; overflow-y: auto; margin: auto; width: 90%; max-width: 600px; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);">
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
-                        <h2 id="modalTitle" style="margin: 0;"></h2>
+                        <h2 style="margin: 0; display: flex; align-items: center; gap: 8px;">
+                            <button id="modalBack" class="modal-back" onclick="backToFlavors()" title="回到選口味" hidden>‹</button>
+                            <span id="modalTitle"></span>
+                        </h2>
                         <button onclick="closeItemModal()" style="background: none; border: none; font-size: 24px; cursor: pointer;">✕</button>
                     </div>
                     <div id="itemsGrid" class="product-grid" style="grid-template-columns: repeat(2, 1fr); gap: 10px;"></div>
@@ -576,7 +581,7 @@
                         groups[key] = { category: p.category, name: p.series, items: [] };
                         seriesData.push(groups[key]);
                     }
-                    groups[key].items.push({ id: p.id, name: p.name, price: p.price, gaoxiong: p.gaoxiong, taizhong: p.taizhong,
+                    groups[key].items.push({ id: p.id, name: p.name, series: p.series, price: p.price, gaoxiong: p.gaoxiong, taizhong: p.taizhong,
                         image: p.has_image ? `${API_URL()}/api/products/${p.id}/image?v=${p.image_version}` : null });
                 });
                 renderSeriesView();
@@ -621,9 +626,36 @@
             view.appendChild(heading);
         }
 
+        // 點「整片系列」這類分類卡 → 跳出視窗：先選口味，再選兩數
         function openDrill(category) {
             drillCategory = category;
-            renderSeriesView();
+            currentSeries = null;
+            renderFlavorView();
+            document.getElementById('itemModal').style.display = 'block';
+        }
+
+        // 視窗第一步：口味
+        function renderFlavorView() {
+            document.getElementById('modalTitle').textContent = drillCategory;
+            document.getElementById('modalBack').hidden = true;
+            const grid = document.getElementById('itemsGrid');
+            grid.innerHTML = '';
+            seriesData.filter(s => s.category === drillCategory).forEach(series => {
+                const card = document.createElement('div');
+                card.className = 'product-card flavor-card';
+                card.innerHTML = `
+                    <div class="product-name">${esc(series.name)}</div>
+                    <div class="flavor-count">${series.items.length} 種兩數</div>
+                `;
+                card.onclick = () => selectSeries(series);
+                grid.appendChild(card);
+            });
+        }
+
+        // 視窗裡的「‹」：回到選口味
+        function backToFlavors() {
+            currentSeries = null;
+            renderFlavorView();
         }
 
         function renderSeriesView() {
@@ -652,19 +684,7 @@
             const seriesTile = (series) => makeTile(series.items.find(i => i.image)?.image, series.name,
                 `${series.items.length} 個品項`, () => selectSeries(series));
 
-            // 第 2 層：點了「整片系列」這類分類卡 → 顯示這個分類的口味
-            if (drillCategory && seriesData.some(s => s.category === drillCategory)) {
-                const back = document.createElement('div');
-                back.className = 'drill-bar';
-                back.innerHTML = `<button class="drill-back">‹ 返回</button><span>${esc(drillCategory)}</span>`;
-                back.querySelector('button').onclick = () => { drillCategory = null; renderSeriesView(); };
-                seriesView.appendChild(back);
-                seriesData.filter(s => s.category === drillCategory).forEach(s => seriesView.appendChild(seriesTile(s)));
-                return;
-            }
-            drillCategory = null;
-
-            // 第 1 層：一般分類直接顯示口味；DRILL_CATEGORIES 的分類先顯示一張分類卡
+            // 一般分類直接顯示口味；一般分類直接顯示口味；DRILL_CATEGORIES 的分類先顯示一張分類卡
             const list = seriesData.filter(s => currentCategory === ALL_TAB || tabOf(s.category) === currentCategory);
             const catOrder = [...new Set(list.map(s => s.category))];
             // 小標題：分類卡用合併後的名稱（整片），其他用原本的分類名稱
@@ -695,7 +715,10 @@
 
         function selectSeries(series) {
             currentSeries = series;
-            document.getElementById('modalTitle').textContent = series.name;
+            // 從分類卡進來的（例如整片系列 → 鹽味）：標題顯示「整片系列・鹽味」，可以按 ‹ 回去選口味
+            const fromDrill = drillCategory && series.category === drillCategory;
+            document.getElementById('modalTitle').textContent = fromDrill ? `${drillCategory}・${series.name}` : series.name;
+            document.getElementById('modalBack').hidden = !fromDrill;
             renderItemsView();
             document.getElementById('itemModal').style.display = 'block';
             loadProducts(); // 抓最新庫存（其他門市或裝置可能剛賣出）
@@ -731,6 +754,7 @@
         function closeItemModal() {
             document.getElementById('itemModal').style.display = 'none';
             currentSeries = null;
+            drillCategory = null;
         }
 
         function addToCart(product) {
@@ -1010,7 +1034,7 @@
                     <div class="cart-item">
                         ${item.image ? `<img class="cart-thumb" src="${item.image}" alt="">` : ''}
                         <div class="cart-item-info">
-                            <div class="cart-item-name">${item.name}</div>
+                            <div class="cart-item-name">${item.series ? esc(item.series) + ' ' : ''}${esc(item.name)}</div>
                             <div class="cart-item-qty">NT$${item.price} × ${item.qty}</div>
                         </div>
                         <div style="display: flex; gap: 5px; align-items: center;">
