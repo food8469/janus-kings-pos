@@ -115,6 +115,7 @@
             <button class="tab-btn" onclick="showTab('staff')">👥 員工統計</button>
             <button class="tab-btn" onclick="showTab('customers')">👥 顧客</button>
             <button class="tab-btn" onclick="showTab('stocktake')">📋 盤點紀錄</button>
+            <button class="tab-btn" onclick="showTab('closes')">📋 小結紀錄</button>
             <button class="tab-btn" onclick="showTab('attendance')">🕐 打卡紀錄</button>
             <button class="tab-btn" onclick="showTab('punchSettings')">🔐 裝置與打卡設定</button>
         </div>
@@ -180,6 +181,29 @@
                 </div>
                 <p class="hint">密碼是 4～6 位數字，只有員工本人知道，打卡時要輸入。門市選「高雄」或「台中」，前台打卡和結帳的「銷售人員」就只會在那家門市出現；選「兩店都有」兩邊都會出現。</p>
             </div>
+        </div>
+
+        <!-- 小結紀錄 -->
+        <div id="closes" class="content">
+            <h2>小結紀錄</h2>
+            <div class="filter-bar" style="align-items: center;">
+                <label>📅 <input type="date" id="closeFrom" onchange="loadCloses()"></label>
+                <span>～</span>
+                <label><input type="date" id="closeTo" onchange="loadCloses()"></label>
+                <select id="closeStore" onchange="loadCloses()"><option value="">全部門市</option><option>高雄</option><option>台中</option></select>
+                <button onclick="loadCloses()">🔄 重新整理</button>
+                <button class="secondary" onclick="exportCloses()">⬇️ 匯出 Excel</button>
+                <button class="secondary" onclick="printCloses()">🖨️ 列印</button>
+            </div>
+            <div id="closeSummaryBox" class="stat-box"></div>
+            <div style="overflow-x: auto;">
+            <table id="closeTable">
+                <thead><tr><th>小結時間</th><th>門市</th><th>小結人員</th><th>期間</th><th>筆數</th><th>營業額</th>
+                    <th>現金</th><th>LINE Pay</th><th>信用卡</th><th>實點現金</th><th>差額</th><th>備註</th><th></th></tr></thead>
+                <tbody></tbody>
+            </table>
+            </div>
+            <p class="hint">員工在前台 ☰ →「📋 小結」完成交班或關店小結。差額 = 實點現金 − 應有現金（現金收入），短少會用紅字顯示。</p>
         </div>
 
         <!-- 打卡紀錄 -->
@@ -398,6 +422,110 @@
             else if (tabName === 'attendance') loadAttendance();
             else if (tabName === 'punchSettings') loadPunchSettings();
             else if (tabName === 'customers') loadCustomers();
+            else if (tabName === 'closes') loadCloses();
+        }
+
+        // ============ 小結紀錄 ============
+        let closeRows = [];
+        const ntd = (n) => `NT$${Number(n || 0).toLocaleString()}`;
+        const signed = (n) => `${n > 0 ? '+' : n < 0 ? '-' : ''}${ntd(Math.abs(n))}`;
+        const shortTime = (t) => new Date(t).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+
+        async function loadCloses() {
+            const from = document.getElementById('closeFrom'), to = document.getElementById('closeTo');
+            if (!from.value && !to.value && !from.dataset.init) {   // 第一次打開預設本月
+                from.dataset.init = '1';
+                const t = today();
+                from.value = t.slice(0, 8) + '01';
+                to.value = t;
+            }
+            const q = new URLSearchParams();
+            if (from.value) q.set('from', from.value);
+            if (to.value) q.set('to', to.value);
+            if (document.getElementById('closeStore').value) q.set('store', document.getElementById('closeStore').value);
+            try {
+                closeRows = (await api(`/api/admin/closes?${q}`)).data;
+            } catch (error) {
+                alert('載入小結紀錄失敗: ' + error.message);
+                return;
+            }
+            const sum = (k) => closeRows.reduce((s, c) => s + c[k], 0);
+            document.getElementById('closeSummaryBox').innerHTML = `
+                <div class="stat"><div class="stat-value">${closeRows.length}</div><div class="stat-label">小結次數</div></div>
+                <div class="stat"><div class="stat-value">${ntd(sum('total'))}</div><div class="stat-label">營業額合計</div></div>
+                <div class="stat"><div class="stat-value">${ntd(sum('cash'))}</div><div class="stat-label">現金合計</div></div>
+                <div class="stat"><div class="stat-value" style="color:${sum('diff') < 0 ? '#e03131' : '#667eea'}">${signed(sum('diff'))}</div><div class="stat-label">差額合計</div></div>`;
+            document.querySelector('#closeTable tbody').innerHTML = closeRows.length ? closeRows.map(c => `
+                <tr>
+                    <td>${twDateTime(c.end_at)}</td>
+                    <td>${escHtml(c.store)}</td>
+                    <td>${escHtml(c.staff)}</td>
+                    <td style="font-size: 12px; color: #888;">${shortTime(c.start_at)} ～<br>${shortTime(c.end_at)}</td>
+                    <td>${c.orders}</td>
+                    <td>${ntd(c.total)}</td>
+                    <td>${ntd(c.cash)}</td>
+                    <td>${ntd(c.linepay)}</td>
+                    <td>${ntd(c.card)}</td>
+                    <td>${ntd(c.counted_cash)}</td>
+                    <td style="font-weight: bold; color:${c.diff < 0 ? '#e03131' : c.diff > 0 ? '#e67700' : '#2b8a3e'}">${signed(c.diff)}</td>
+                    <td style="font-size: 13px;">${escHtml(c.note || '')}</td>
+                    <td><button class="row-btn danger" onclick="deleteClose(${c.id})">🗑️</button></td>
+                </tr>`).join('') : '<tr><td colspan="13" style="color:#999">這段期間沒有小結紀錄</td></tr>';
+        }
+
+        async function deleteClose(id) {
+            const c = closeRows.find(x => x.id === id);
+            if (!confirm(`確定要刪除這筆小結？\n\n${c.store}　${twDateTime(c.end_at)}　${c.staff}\n\n刪除後，前台下一次小結會從前一筆小結的時間開始算。`)) return;
+            try {
+                await postJson('/api/admin/closes/delete', { id });
+                loadCloses();
+            } catch (error) {
+                alert('刪除失敗: ' + error.message);
+            }
+        }
+
+        function closeTableRows() {
+            return [['小結時間', '門市', '小結人員', '期間開始', '期間結束', '結帳筆數', '商品件數', '營業額', '折扣', '現金', 'LINE Pay', '信用卡', '未記錄付款', '實點現金', '差額', '備註'],
+                ...closeRows.map(c => [twDateTime(c.end_at), c.store, c.staff, twDateTime(c.start_at), twDateTime(c.end_at), c.orders, c.items,
+                    c.total, c.discount, c.cash, c.linepay, c.card, c.other, c.counted_cash, c.diff, c.note || ''])];
+        }
+
+        function exportCloses() {
+            if (!closeRows.length) { alert('沒有可以匯出的小結紀錄'); return; }
+            const from = document.getElementById('closeFrom').value || '全部', to = document.getElementById('closeTo').value || '全部';
+            exportXlsx(closeTableRows(), `野烏金小結紀錄_${from}_${to}.xlsx`, '小結紀錄');
+        }
+
+        function printCloses() {
+            if (!closeRows.length) { alert('沒有可以列印的小結紀錄'); return; }
+            const from = document.getElementById('closeFrom').value, to = document.getElementById('closeTo').value;
+            const store = document.getElementById('closeStore').value;
+            const title = `野烏金 小結紀錄　${from || ''} ～ ${to || ''}${store ? '　' + store + '門市' : ''}`;
+            const win = window.open('', '_blank');
+            if (!win) { alert('瀏覽器擋住了列印視窗，請允許這個網站開啟彈出式視窗'); return; }
+            win.document.write(`<!DOCTYPE html><html lang="zh-TW"><head><meta charset="UTF-8"><title>${escHtml(title)}</title>
+                <style>
+                    @page { size: A4 landscape; margin: 12mm; }
+                    body { font-family: 'Microsoft JhengHei', sans-serif; font-size: 12px; color: #222; }
+                    h1 { font-size: 17px; margin: 0 0 4px; }
+                    table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+                    th, td { border: 1px solid #999; padding: 4px 6px; text-align: left; }
+                    th { background: #eee; }
+                    .short { color: #c00; font-weight: bold; }
+                    .no-print { margin-bottom: 10px; }
+                    @media print { .no-print { display: none; } }
+                </style></head><body>
+                <div class="no-print"><button onclick="window.print()">🖨️ 列印</button></div>
+                <h1>${escHtml(title)}</h1>
+                <div>列印時間：${twDateTime(new Date())}</div>
+                <table><thead><tr><th>小結時間</th><th>門市</th><th>人員</th><th>筆數</th><th>營業額</th><th>現金</th><th>LINE Pay</th><th>信用卡</th><th>實點現金</th><th>差額</th><th>備註</th></tr></thead><tbody>
+                ${closeRows.map(c => `<tr><td>${twDateTime(c.end_at)}</td><td>${escHtml(c.store)}</td><td>${escHtml(c.staff)}</td><td>${c.orders}</td>
+                    <td>${ntd(c.total)}</td><td>${ntd(c.cash)}</td><td>${ntd(c.linepay)}</td><td>${ntd(c.card)}</td><td>${ntd(c.counted_cash)}</td>
+                    <td class="${c.diff < 0 ? 'short' : ''}">${signed(c.diff)}</td><td>${escHtml(c.note || '')}</td></tr>`).join('')}
+                </tbody></table></body></html>`);
+            win.document.close();
+            win.focus();
+            setTimeout(() => win.print(), 300);
         }
 
         // ============ 顧客管理 ============

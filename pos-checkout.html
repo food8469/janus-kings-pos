@@ -124,6 +124,32 @@
         .pay-method:hover { border-color: #667eea; background: #f7f8ff; }
         .pay-method:active { transform: scale(0.98); }
         .pay-method:disabled { opacity: 0.5; cursor: wait; }
+        /* 小結 */
+        .close-box { background: white; border-radius: 8px; padding: 12px 14px; font-size: 14px; }
+        .close-period { font-size: 12px; color: #888; margin-bottom: 8px; }
+        .close-row { display: flex; justify-content: space-between; padding: 4px 0; }
+        .close-row.big { font-size: 17px; color: #667eea; border-bottom: 1px solid #eee; padding-bottom: 8px; margin-bottom: 4px; }
+        .close-row.expect { border-top: 1px dashed #ccc; margin-top: 6px; padding-top: 8px; font-size: 15px; }
+        .close-form { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
+        .close-form label { font-size: 13px; color: #555; margin: 4px 0 -2px; }
+        .close-form input, .close-form select { padding: 10px; font-size: 15px; }
+        #closeCounted { font-size: 22px; font-weight: bold; }
+        .close-diff { font-size: 15px; font-weight: bold; min-height: 20px; }
+        .close-diff.ok { color: #2b8a3e; }
+        .close-diff.short { color: #e03131; }
+        .close-diff.over { color: #e67700; }
+
+        /* 誰來結帳 */
+        .staff-card { max-width: 560px; }
+        .close-red { color: #e03131; font-size: 22px; }
+        #staffSearch { padding: 10px 12px; font-size: 15px; background: #f1f3f5; border: none; border-radius: 8px; margin-bottom: 14px; }
+        .staff-pick-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+        .staff-pick { background: white; border: 1.5px solid #555; border-radius: 6px; padding: 14px 8px 10px; text-align: center; cursor: pointer; font-family: inherit; }
+        .staff-pick:hover { border-color: #667eea; background: #f7f8ff; }
+        .staff-pick.selected { border-color: #667eea; background: #eef1ff; box-shadow: 0 0 0 2px #667eea inset; }
+        .staff-pick b { display: block; font-size: 17px; color: #222; margin-bottom: 14px; }
+        .staff-pick small { font-size: 14px; color: #adb5bd; }
+        .staff-pick small.on { color: #40c057; }
         .pay-title { display: flex; align-items: center; gap: 10px; }
         .pay-reset { background: none; border: none; color: #2b8a3e; font-size: 13px; cursor: pointer; padding: 2px 6px; border-radius: 6px; font-family: inherit; }
         .pay-reset:hover { background: #ebfbee; }
@@ -298,9 +324,11 @@
                     <button class="small-btn ghost" onclick="clearDiscount()">移除</button>
                 </div>
 
-                <div class="cart-row">
-                    <span>銷售人員</span>
-                    <select id="staff" class="staff-select">
+                <!-- 銷售人員：點了跳出「誰來結帳」選人（下拉選單藏起來，存名單和選到的人） -->
+                <div class="cart-row clickable" onclick="openStaffPicker()">
+                    <span><span class="row-icon">🧑‍💼</span>銷售人員</span>
+                    <span id="staffLabel" class="payment-label empty">請選擇 ›</span>
+                    <select id="staff" hidden>
                         <option value="">-- 選擇人員 --</option>
                     </select>
                 </div>
@@ -314,6 +342,19 @@
                 <button class="checkout-btn big" id="checkoutBtn" onclick="checkout()">結帳　<span id="totalAmount">NT$0</span></button>
                 <div id="message"></div>
             </div>
+        </div>
+    </div>
+
+    <!-- 誰來結帳：選銷售人員 -->
+    <div id="staffModal" class="modal-overlay" hidden onclick="if (event.target === this) closeStaffPicker()">
+        <div class="modal-card staff-card">
+            <div class="modal-head">
+                <button class="icon-btn close-red" onclick="closeStaffPicker()">✕</button>
+                <h3 style="text-align: center;">誰來結帳</h3>
+                <span style="width: 36px;"></span>
+            </div>
+            <input type="search" id="staffSearch" placeholder="🔍 搜尋員工姓名" autocomplete="off" oninput="renderStaffPicker()">
+            <div id="staffPickerGrid" class="staff-pick-grid"></div>
         </div>
     </div>
 
@@ -439,6 +480,10 @@
                         <span class="menu-icon">🧾</span>
                         <span><b>結帳紀錄</b><small>今日每一筆結帳</small></span>
                     </button>
+                    <button class="menu-item" onclick="showMenuTab('close')">
+                        <span class="menu-icon">📋</span>
+                        <span><b>小結</b><small>交班 / 關店：點現金、算差額</small></span>
+                    </button>
                 </div>
 
                 <div class="menu-store" id="menuStoreRow" hidden>
@@ -473,6 +518,24 @@
                     <div id="dayByPayment" class="pay-summary"></div>
                     <div class="list-title">今日結帳明細（最新的在最上面）</div>
                     <div id="orderList"></div>
+                </div>
+
+                <!-- 交班 / 關店小結 -->
+                <div id="closePanel" hidden>
+                    <div id="closeSummary" class="close-box">計算中…</div>
+                    <div class="close-form">
+                        <label>小結人員</label>
+                        <select id="closeStaff"></select>
+                        <label>實際點到的現金</label>
+                        <input type="number" id="closeCounted" inputmode="numeric" min="0" placeholder="例：12800" oninput="updateCloseDiff()">
+                        <div id="closeDiff" class="close-diff"></div>
+                        <label>備註（選填）</label>
+                        <input type="text" id="closeNote" maxlength="300" placeholder="例：找錯錢 100 元">
+                        <button class="checkout-btn" id="closeBtn" onclick="submitClose()">✅ 完成小結</button>
+                        <div id="closeMessage"></div>
+                    </div>
+                    <div class="list-title">最近的小結紀錄</div>
+                    <div id="closeHistory"></div>
                 </div>
             </div>
         </div>
@@ -1137,10 +1200,210 @@
             if (!staff) { msg.className = 'message error'; msg.textContent = '請選擇銷售人員'; return; }
             if (tax && !/^\d{8}$/.test(tax)) { msg.className = 'message error'; msg.textContent = '統一編號是 8 位數字'; return; }
             document.getElementById('staff').value = staff;
+            updateStaffLabel();
             payment = method;
             taxId = tax;
             renderPayment();
             closePayModal();
+        }
+
+        // ---- 交班 / 關店小結 ----
+        let closePreview = null;
+        let lastClose = null;   // 剛完成的小結（列印用）
+        const nt = (n) => `NT$${Number(n || 0).toLocaleString()}`;
+        const mdhm = (t) => new Date(t).toLocaleString('zh-TW', { timeZone: 'Asia/Taipei', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+
+        function closeLines(c) {
+            return `
+                <div class="close-row"><span>結帳筆數</span><b>${c.orders} 筆（${c.items} 件）</b></div>
+                <div class="close-row big"><span>營業額</span><b>${nt(c.total)}</b></div>
+                ${c.discount ? `<div class="close-row"><span>其中折扣</span><span>-${nt(c.discount)}</span></div>` : ''}
+                <div class="close-row"><span>💵 現金</span><span>${nt(c.cash)}</span></div>
+                <div class="close-row"><span>💚 LINE Pay</span><span>${nt(c.linepay)}</span></div>
+                <div class="close-row"><span>💳 信用卡</span><span>${nt(c.card)}</span></div>
+                ${c.other ? `<div class="close-row"><span>❔ 未記錄付款方式</span><span>${nt(c.other)}</span></div>` : ''}`;
+        }
+
+        async function loadClose() {
+            // 小結人員：預設帶結帳區選的人
+            const sel = document.getElementById('closeStaff');
+            sel.innerHTML = document.getElementById('staff').innerHTML;
+            sel.value = document.getElementById('staff').value;
+            ['closeCounted', 'closeNote'].forEach(id => document.getElementById(id).value = '');
+            document.getElementById('closeMessage').className = '';
+            document.getElementById('closeMessage').textContent = '';
+            const box = document.getElementById('closeSummary');
+            box.textContent = '計算中…';
+            try {
+                closePreview = await getJson('/api/pos/close/preview');
+                box.innerHTML = `
+                    <div class="close-period">📅 ${mdhm(closePreview.start_at)} ～ ${mdhm(closePreview.end_at)}（從上次小結到現在）</div>
+                    ${closeLines(closePreview)}
+                    <div class="close-row expect"><span>應有現金</span><b>${nt(closePreview.cash)}</b></div>`;
+            } catch (error) {
+                box.innerHTML = `<span style="color:#e03131">計算失敗：${esc(error.message)}</span>`;
+            }
+            updateCloseDiff();
+            loadCloseHistory();
+        }
+
+        function updateCloseDiff() {
+            const box = document.getElementById('closeDiff');
+            const v = document.getElementById('closeCounted').value;
+            if (v === '' || !closePreview) { box.textContent = ''; box.className = 'close-diff'; return; }
+            const diff = Number(v) - closePreview.cash;
+            box.className = 'close-diff ' + (diff < 0 ? 'short' : diff > 0 ? 'over' : 'ok');
+            box.textContent = diff === 0 ? '✓ 差額 0，現金剛好' : diff < 0 ? `差額 -${nt(-diff)}（短少）` : `差額 +${nt(diff)}（多出）`;
+        }
+
+        async function submitClose() {
+            const msg = document.getElementById('closeMessage');
+            const fail = (t) => { msg.className = 'message error'; msg.textContent = t; };
+            const staff = document.getElementById('closeStaff').value;
+            const counted = document.getElementById('closeCounted').value;
+            if (!staff) return fail('請選擇小結人員');
+            if (counted === '' || !Number.isInteger(Number(counted)) || Number(counted) < 0) return fail('請輸入實際點到的現金（整數）');
+            if (!confirm(`確定要完成小結？\n\n小結人員：${staff}\n實點現金：${nt(counted)}\n\n完成後，下一次小結會從現在開始計算。`)) return;
+
+            const btn = document.getElementById('closeBtn');
+            btn.disabled = true;
+            try {
+                const res = await posFetch('/api/pos/close', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ staff, counted_cash: Number(counted), note: document.getElementById('closeNote').value.trim() })
+                });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.message);
+                lastClose = data.data;
+                msg.className = 'message success';
+                msg.innerHTML = '✓ 小結完成　<button class="small-btn" onclick="printClose(lastClose)">🖨️ 列印小結單</button>';
+                const done = msg.innerHTML;
+                await loadClose();   // 重新開始新的一段
+                msg.className = 'message success';
+                msg.innerHTML = done;
+            } catch (error) {
+                fail('小結失敗：' + error.message);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        let closeHistory = [];
+        async function loadCloseHistory() {
+            const box = document.getElementById('closeHistory');
+            try {
+                closeHistory = await getJson('/api/pos/close/history');
+                box.innerHTML = closeHistory.length ? closeHistory.map((c, i) => `
+                    <div class="order-card">
+                        <div class="order-head"><span>📋 ${mdhm(c.start_at)} ～ ${mdhm(c.end_at)}</span><span>👤 ${esc(c.staff)}</span></div>
+                        <div class="order-line"><span>營業額（${c.orders} 筆）</span><span>${nt(c.total)}</span></div>
+                        <div class="order-line"><span>現金 / LINE Pay / 信用卡</span><span>${nt(c.cash)} / ${nt(c.linepay)} / ${nt(c.card)}</span></div>
+                        <div class="order-line"><span>實點現金</span><span>${nt(c.counted_cash)}</span></div>
+                        <div class="order-total"><span>差額</span>
+                            <span style="color:${c.diff < 0 ? '#e03131' : c.diff > 0 ? '#e67700' : '#2b8a3e'}">${c.diff > 0 ? '+' : c.diff < 0 ? '-' : ''}${nt(Math.abs(c.diff))}</span></div>
+                        ${c.note ? `<div class="punch-note-text">📝 ${esc(c.note)}</div>` : ''}
+                        <button class="small-btn ghost" style="margin-top: 6px;" onclick="printClose(closeHistory[${i}])">🖨️ 列印</button>
+                    </div>`).join('') : '<div class="empty">還沒有小結紀錄</div>';
+            } catch (error) {
+                box.innerHTML = `<div class="message error">載入失敗：${esc(error.message)}</div>`;
+            }
+        }
+
+        // 列印小結單（窄版，收據機或 A4 都可以印）
+        function printClose(c) {
+            const win = window.open('', '_blank');
+            if (!win) { alert('瀏覽器擋住了列印視窗，請允許這個網站開啟彈出式視窗'); return; }
+            const row = (k, v, bold) => `<tr><td>${k}</td><td style="text-align:right;${bold ? 'font-weight:bold' : ''}">${v}</td></tr>`;
+            win.document.write(`<!DOCTYPE html><html lang="zh-TW"><head><meta charset="UTF-8"><title>小結單</title>
+                <style>
+                    body { font-family: 'Microsoft JhengHei', sans-serif; width: 72mm; margin: 0 auto; padding: 6mm 0; font-size: 13px; color: #000; }
+                    h1 { font-size: 17px; text-align: center; margin: 0 0 4px; }
+                    .c { text-align: center; font-size: 12px; }
+                    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+                    td { padding: 3px 0; }
+                    hr { border: none; border-top: 1px dashed #000; margin: 8px 0; }
+                    .sign { margin-top: 26px; border-top: 1px solid #000; text-align: center; font-size: 12px; padding-top: 3px; }
+                    .no-print { text-align: center; margin-bottom: 8px; }
+                    @media print { .no-print { display: none; } @page { margin: 4mm; } }
+                </style></head><body>
+                <div class="no-print"><button onclick="window.print()">🖨️ 列印</button></div>
+                <h1>野烏金 ${esc(c.store)}門市　小結單</h1>
+                <div class="c">${mdhm(c.start_at)} ～ ${mdhm(c.end_at)}</div>
+                <div class="c">小結人員：${esc(c.staff)}</div>
+                <hr>
+                <table>
+                    ${row('結帳筆數', `${c.orders} 筆（${c.items} 件）`)}
+                    ${row('營業額', nt(c.total), true)}
+                    ${c.discount ? row('其中折扣', '-' + nt(c.discount)) : ''}
+                </table>
+                <hr>
+                <table>
+                    ${row('現金', nt(c.cash))}
+                    ${row('LINE Pay', nt(c.linepay))}
+                    ${row('信用卡', nt(c.card))}
+                    ${c.other ? row('未記錄付款', nt(c.other)) : ''}
+                </table>
+                <hr>
+                <table>
+                    ${row('應有現金', nt(c.cash))}
+                    ${row('實點現金', nt(c.counted_cash))}
+                    ${row('差額', `${c.diff > 0 ? '+' : c.diff < 0 ? '-' : ''}${nt(Math.abs(c.diff))}${c.diff < 0 ? '（短少）' : c.diff > 0 ? '（多出）' : ''}`, true)}
+                </table>
+                ${c.note ? `<hr><div>備註：${esc(c.note)}</div>` : ''}
+                <div class="sign">簽名</div>
+                </body></html>`);
+            win.document.close();
+            win.focus();
+            setTimeout(() => win.print(), 300);
+        }
+
+        // ---- 誰來結帳：選銷售人員，顯示今天的打卡狀態 ----
+        let dutyStatus = {};   // { 名字: 'in' | 'out' }（今天最後一次打卡）
+
+        function updateStaffLabel() {
+            const name = document.getElementById('staff').value;
+            const label = document.getElementById('staffLabel');
+            label.className = 'payment-label' + (name ? '' : ' empty');
+            label.textContent = name ? `${name} ✎` : '請選擇 ›';
+        }
+
+        async function openStaffPicker() {
+            document.getElementById('staffSearch').value = '';
+            document.getElementById('staffModal').hidden = false;
+            renderStaffPicker();
+            try {
+                // 今天這家門市的打卡（新的在前）→ 每個人最後一次是上班還是下班
+                const rows = await getJson('/api/attendance/today');
+                dutyStatus = {};
+                rows.forEach(r => { if (!(r.staff in dutyStatus)) dutyStatus[r.staff] = r.type; });
+            } catch (e) { dutyStatus = {}; }
+            renderStaffPicker();
+        }
+
+        function closeStaffPicker() {
+            document.getElementById('staffModal').hidden = true;
+        }
+
+        function renderStaffPicker() {
+            const q = document.getElementById('staffSearch').value.trim().toLowerCase();
+            const current = document.getElementById('staff').value;
+            const names = [...document.getElementById('staff').options].map(o => o.value).filter(Boolean)
+                .filter(n => !q || n.toLowerCase().includes(q));
+            const statusText = { in: '上班中', out: '已下班' };
+            const grid = document.getElementById('staffPickerGrid');
+            grid.innerHTML = names.length ? '' : '<div class="empty">找不到這位員工</div>';
+            names.forEach(n => {
+                const btn = document.createElement('button');
+                btn.className = 'staff-pick' + (n === current ? ' selected' : '');
+                btn.innerHTML = `<b>${esc(n)}</b><small class="${dutyStatus[n] === 'in' ? 'on' : ''}">${statusText[dutyStatus[n]] || '未打卡'}</small>`;
+                btn.onclick = () => {
+                    document.getElementById('staff').value = n;
+                    updateStaffLabel();
+                    closeStaffPicker();
+                };
+                grid.appendChild(btn);
+            });
         }
 
         // 付款視窗的「↻ 重整」：清掉已選的付款方式和統編，視窗保持開著重新選
@@ -1272,17 +1535,19 @@
 
         function showMenuTab(tab) {
             menuTab = tab;
-            const titles = { home: '☰ 選單', punch: '🕐 打卡', orders: '🧾 結帳紀錄' };
+            const titles = { home: '☰ 選單', punch: '🕐 打卡', orders: '🧾 結帳紀錄', close: '📋 小結' };
             document.getElementById('menuTitle').textContent = titles[tab];
             document.getElementById('menuBack').hidden = tab === 'home';
             document.getElementById('menuHome').hidden = tab !== 'home';
             document.getElementById('menuStoreRow').hidden = tab === 'home';
             document.getElementById('punchPanel').hidden = tab !== 'punch';
             document.getElementById('ordersPanel').hidden = tab !== 'orders';
+            document.getElementById('closePanel').hidden = tab !== 'close';
             document.getElementById('punchMessage').className = '';
             document.getElementById('punchMessage').textContent = '';
             if (tab === 'punch') checkDevice().then(loadPunches);
             else if (tab === 'orders') loadOrders();
+            else if (tab === 'close') loadClose();
         }
 
         // 打卡畫面上方顯示這台裝置
@@ -1305,6 +1570,7 @@
                 const current = select.value;
                 select.innerHTML = options;
                 select.value = current;
+                updateStaffLabel();
             } catch (e) { /* 讀不到就保留原本的名單 */ }
         }
 

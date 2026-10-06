@@ -85,6 +85,28 @@ async function initDb() {
     -- 商品圖片（壓縮後的 JPEG，存成 data URL）；image_version 用來讓瀏覽器換新圖
     ALTER TABLE products ADD COLUMN IF NOT EXISTS image TEXT;
     ALTER TABLE products ADD COLUMN IF NOT EXISTS image_version INTEGER NOT NULL DEFAULT 0;
+    -- 交班 / 關店小結
+    CREATE TABLE IF NOT EXISTS shift_closes (
+      id           SERIAL PRIMARY KEY,
+      store        TEXT NOT NULL,
+      staff        TEXT NOT NULL,
+      start_at     TIMESTAMPTZ NOT NULL,
+      end_at       TIMESTAMPTZ NOT NULL,
+      orders       INTEGER NOT NULL,
+      items        INTEGER NOT NULL,
+      total        INTEGER NOT NULL,
+      cash         INTEGER NOT NULL,
+      linepay      INTEGER NOT NULL,
+      card         INTEGER NOT NULL,
+      other        INTEGER NOT NULL,
+      discount     INTEGER NOT NULL,
+      counted_cash INTEGER NOT NULL,
+      diff         INTEGER NOT NULL,
+      note         TEXT,
+      device_name  TEXT,
+      created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS shift_closes_store_idx ON shift_closes (store, end_at);
     -- 前台圖卡圖片：key = 'cat:分類' 或 'series:分類|系列'
     CREATE TABLE IF NOT EXISTS tile_images (
       key     TEXT PRIMARY KEY,
@@ -241,6 +263,80 @@ app.get('/api/products/:id/image', async (req, res) => {
   if (!m) return res.status(404).end();
   res.set('Cache-Control', 'public, max-age=31536000, immutable');
   res.type(m[1]).send(Buffer.from(m[2], 'base64'));
+});
+
+// ============ 交班 / 關店小結 ============
+// 期間：這家門市上一次小結的結束時間 → 現在；第一次小結就從今天 0 點（台灣時間）開始
+async function closeSummary(store) {
+  const { rows: [last] } = await pool.query(
+    'SELECT end_at FROM shift_closes WHERE store = $1 ORDER BY end_at DESC LIMIT 1', [store]);
+  const { rows: [{ now, today }] } = await pool.query(
+    `SELECT NOW() AS now, ((NOW() AT TIME ZONE 'Asia/Taipei')::date::timestamp AT TIME ZONE 'Asia/Taipei') AS today`);
+  const start = last ? last.end_at : today;
+  const { rows: [s] } = await pool.query(
+    `SELECT COUNT(DISTINCT COALESCE(order_no, id::text))::int AS orders,
+            COALESCE(SUM(quantity), 0)::int AS items,
+            COALESCE(SUM(total), 0)::int AS total,
+            COALESCE(SUM(total) FILTER (WHERE payment_method = '現金'), 0)::int AS cash,
+            COALESCE(SUM(total) FILTER (WHERE payment_method = 'LINE Pay'), 0)::int AS linepay,
+            COALESCE(SUM(total) FILTER (WHERE payment_method = '信用卡'), 0)::int AS card,
+            COALESCE(SUM(total) FILTER (WHERE payment_method IS NULL OR payment_method NOT IN ('現金', 'LINE Pay', '信用卡')), 0)::int AS other,
+            COALESCE(SUM(discount), 0)::int AS discount
+     FROM sales WHERE store = $1 AND created_at > $2 AND created_at <= $3`, [store, start, now]);
+  return { store, start_at: start, end_at: now, ...s };
+}
+
+// 前台：目前這一段的小結預覽（還沒存）
+app.get('/api/pos/close/preview', requireDevice, async (req, res) => {
+  const store = req.device ? req.device.store : req.query.store;
+  if (!STORE_KEYS[store]) return res.status(400).json({ status: 'error', message: '門市錯誤' });
+  res.json({ status: 'success', data: await closeSummary(store) });
+});
+
+// 前台：完成小結（金額由伺服器重新計算，不信任前台傳來的數字）
+app.post('/api/pos/close', requireDevice, async (req, res) => {
+  const store = req.device ? req.device.store : req.body?.store;
+  if (!STORE_KEYS[store]) return res.status(400).json({ status: 'error', message: '門市錯誤' });
+  const staff = cleanText(req.body?.staff, 30);
+  if (!staff) return res.status(400).json({ status: 'error', message: '請選擇小結人員' });
+  const counted = toInt(req.body?.counted_cash, '實點現金');
+  if (counted === null) return res.status(400).json({ status: 'error', message: '請輸入實際點到的現金' });
+
+  const s = await closeSummary(store);
+  const { rows: [row] } = await pool.query(
+    `INSERT INTO shift_closes (store, staff, start_at, end_at, orders, items, total, cash, linepay, card, other, discount,
+                               counted_cash, diff, note, device_name)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16) RETURNING *`,
+    [store, staff, s.start_at, s.end_at, s.orders, s.items, s.total, s.cash, s.linepay, s.card, s.other, s.discount,
+     counted, counted - s.cash, cleanText(req.body?.note, 300), req.device ? req.device.name : '後台']);
+  res.json({ status: 'success', message: '小結完成', data: row });
+});
+
+// 前台：這家門市最近的小結
+app.get('/api/pos/close/history', requireDevice, async (req, res) => {
+  const store = req.device ? req.device.store : req.query.store;
+  const { rows } = await pool.query(
+    'SELECT * FROM shift_closes WHERE store = $1 ORDER BY end_at DESC LIMIT 20', [store]);
+  res.json({ status: 'success', data: rows });
+});
+
+// 後台：小結紀錄（?from=&to= 依小結日期，台灣時間）
+app.get('/api/admin/closes', requireAdmin, async (req, res) => {
+  const where = [], params = [];
+  const local = `(end_at AT TIME ZONE 'Asia/Taipei')::date`;
+  if (cleanDate(req.query.from)) { params.push(req.query.from); where.push(`${local} >= $${params.length}::date`); }
+  if (cleanDate(req.query.to)) { params.push(req.query.to); where.push(`${local} <= $${params.length}::date`); }
+  if (STORE_KEYS[req.query.store]) { params.push(req.query.store); where.push(`store = $${params.length}`); }
+  const { rows } = await pool.query(
+    `SELECT * FROM shift_closes ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY end_at DESC LIMIT 2000`, params);
+  res.json({ status: 'success', data: rows });
+});
+
+// 後台：刪除一筆小結（例如按錯）；刪掉後下一次小結會從前一筆的結束時間開始算
+app.post('/api/admin/closes/delete', requireAdmin, async (req, res) => {
+  const { rowCount } = await pool.query('DELETE FROM shift_closes WHERE id = $1', [toInt(req.body?.id, '小結')]);
+  if (!rowCount) return res.status(404).json({ status: 'error', message: '找不到這筆小結' });
+  res.json({ status: 'success', message: '已刪除這筆小結' });
 });
 
 // ============ 前台圖卡圖片（分類卡、系列卡）============
