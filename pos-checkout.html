@@ -675,7 +675,6 @@
                 const inCart = cart[item.id] ? cart[item.id].qty : 0;
                 const stockClass = stock - inCart <= 0 ? 'out' : stock - inCart <= 5 ? 'low' : '';
                 card.innerHTML = `
-                    ${item.image ? `<img class="product-img" src="${item.image}" alt="" loading="lazy">` : ''}
                     <div class="product-name">${item.name}</div>
                     <div class="product-price">NT$${item.price}</div>
                     <div class="product-stock ${stockClass}">
