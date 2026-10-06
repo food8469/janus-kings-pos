@@ -533,8 +533,8 @@
                 <div style="display: flex; gap: 10px;">
                     <div style="flex: 1; min-width: 0;">
                         <label>生日</label>
-                        <input type="text" id="custBirthday" inputmode="numeric" maxlength="10" placeholder="例：1990/05/20"
-                               autocomplete="off" oninput="formatBirthdayInput(this)">
+                        <input type="text" id="custBirthday" inputmode="numeric" maxlength="10" placeholder="例：1990/05/20 或民國 79/05/20"
+                               autocomplete="off" oninput="formatBirthdayInput(this, event)">
                     </div>
                     <div style="flex: 1; min-width: 0;">
                         <label>統一編號</label>
@@ -1145,6 +1145,7 @@
                 document.getElementById('custTitle').textContent = '＋ 新增顧客';
                 document.getElementById('custSaveBtn').textContent = '💾 儲存並選用';
                 ['custName', 'custPhone', 'custAddress', 'custBirthday', 'custTaxId'].forEach(id => document.getElementById(id).value = '');
+                delete document.getElementById('custBirthday').dataset.manual;
                 document.getElementById('custName').focus();
             }
             if (view !== 'form') editingCustomerId = null;
@@ -1247,18 +1248,24 @@
             document.getElementById('custPhone').value = c.phone || '';
             document.getElementById('custAddress').value = c.address || '';
             document.getElementById('custBirthday').value = c.birthday ? String(c.birthday).slice(0, 10).replace(/-/g, '/') : '';
+            delete document.getElementById('custBirthday').dataset.manual;
             document.getElementById('custTaxId').value = c.tax_id || '';
         }
 
-        // 生日：只打數字也會自動加上斜線 → 1990/05/20
-        function formatBirthdayInput(input) {
-            const raw = input.value;
-            // 西元年（4 位數開頭）才自動排版；民國年（例：79/5/20）或打其他符號就不動它
-            if (!/^\d*$/.test(raw) && !/^\d{4}\/\d{0,3}$/.test(raw) && !/^\d{4}\/\d{2}\/\d*$/.test(raw)) return;
-            if (/^\d{1,3}$/.test(raw)) return;
-            const d = raw.replace(/\D/g, '').slice(0, 8);
-            input.value = d.length > 6 ? `${d.slice(0, 4)}/${d.slice(4, 6)}/${d.slice(6)}`
-                : d.length > 4 ? `${d.slice(0, 4)}/${d.slice(4)}` : d;
+        // 生日年份幾位數：19xx、20xx 是西元；1xx（民國 100 年後）3 位；其他（例：79）民國 2 位
+        const birthYearLen = (d) => /^(19|20)/.test(d) ? 4 : /^1/.test(d) ? 3 : 2;
+
+        // 生日：只打數字會自動加上斜線 → 1990/05/20、79/05/20、101/05/20
+        // 自己打了斜線就照自己打的，不自動排版
+        function formatBirthdayInput(input, event) {
+            if (!input.value) { delete input.dataset.manual; return; }
+            if (event && event.data && /[\/\-.]/.test(event.data)) input.dataset.manual = '1';
+            if (input.dataset.manual) return;
+            let d = input.value.replace(/\D/g, '');
+            const y = birthYearLen(d);
+            d = d.slice(0, y + 4);
+            input.value = d.length > y + 2 ? `${d.slice(0, y)}/${d.slice(y, y + 2)}/${d.slice(y + 2)}`
+                : d.length > y ? `${d.slice(0, y)}/${d.slice(y)}` : d;
         }
 
         // 生日文字 → YYYY-MM-DD；空白回傳 ''，看不懂回傳 null。民國年（例：79/5/20）會自動換成西元
