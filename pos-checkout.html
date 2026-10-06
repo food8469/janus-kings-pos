@@ -793,7 +793,8 @@
             // 小標題：分類卡用合併後的名稱（整片），其他用原本的分類名稱
             const groupOf = (category) => DRILL_CATEGORIES.includes(category) || SINGLE_TILE_CATEGORIES.includes(category) ? tabOf(category) : category;
             const groups = [...new Set(catOrder.map(groupOf))];
-            const showHeadings = groups.length > 1;
+            // 「全部」不分區，所有卡片放在同一個畫面；其他分類有好幾區時才加小標題
+            const showHeadings = currentCategory !== ALL_TAB && groups.length > 1;
             groups.forEach(group => {
                 if (showHeadings) addHeading(seriesView, group);
                 catOrder.filter(c => groupOf(c) === group).forEach(category => {
@@ -812,7 +813,7 @@
         }
 
         // 前台合併顯示的分類：{ 後台的大分類: 前台按鈕名稱（也是「全部」裡的小標題）}。後台不受影響
-        const MERGED_TABS = { '整片系列': '整片', '頂規整片': '整片', '手拿盒': '整片' };
+        const MERGED_TABS = { '整片系列': '整片', '頂規整片': '整片', '手拿盒': '一口吃' };
         const ALL_TAB = '全部';
         // 這些分類先顯示一張分類卡，點進去才是口味，再點選兩數
         const DRILL_CATEGORIES = ['整片系列', '頂規整片'];
