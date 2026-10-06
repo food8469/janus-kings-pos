@@ -232,11 +232,21 @@
         .discount-amt { color: #e03131; font-weight: bold; }
         .discount-edit select { flex: 0 0 auto; width: 90px; }
         .discount-presets { padding: 8px 0 2px; }
-        /* 優惠一排，左右滑動 */
-        .preset-scroll { display: flex; gap: 8px; overflow-x: auto; padding: 2px 4px 6px; scroll-snap-type: x proximity;
-            -webkit-overflow-scrolling: touch; scrollbar-width: none; }
-        .preset-scroll::-webkit-scrollbar { display: none; }
-        .preset-scroll .preset-chip { flex: 0 0 auto; white-space: nowrap; scroll-snap-align: start; }
+        /* 優惠清單：點「折扣」往下展開，上下滑動選 */
+        .discount-card { display: flex; flex-direction: column; overflow: hidden; }
+        .discount-card .discount-presets { padding: 0; min-height: 0; display: flex; flex-direction: column; }
+        .no-discount { margin-top: 12px; width: 100%; padding: 12px; font-size: 15px; }
+        .preset-scroll { display: flex; flex-direction: column; max-height: 55vh; overflow-y: auto; overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch; background: white; border: 1px solid #eee; border-radius: 10px; }
+        .preset-scroll .preset-chip { display: flex; justify-content: space-between; align-items: center; width: 100%;
+            border: none; border-bottom: 1px solid #f1f3f5; border-radius: 0; background: white; color: #333;
+            padding: 14px 14px; font-size: 15px; flex: 0 0 auto; }
+        .preset-scroll .preset-chip:last-child { border-bottom: none; }
+        .preset-scroll .preset-chip small { color: #e03131; font-size: 13px; margin-left: 10px; white-space: nowrap; }
+        .preset-scroll .preset-chip:active { background: #fff5f5; }
+        .preset-scroll .preset-chip.active { background: #fff0f0; color: #c92a2a; font-weight: bold; }
+        .preset-scroll .preset-chip.active small::after { content: ' ✓'; }
+        .preset-scroll .preset-chip.active small { color: #c92a2a; }
         .preset-chip { border: 1.5px solid #ffa8a8; background: #fff5f5; color: #c92a2a; border-radius: 16px; padding: 6px 12px; font-size: 13px; font-family: inherit; cursor: pointer; text-align: left; }
         .preset-chip small { color: #999; margin-left: 4px; }
         .preset-chip.active { background: #e03131; color: white; border-color: #e03131; }
@@ -386,8 +396,6 @@
                     <span><span class="row-icon">🏷️</span><span id="discountLabel">折扣</span></span>
                     <span id="discountAmount" class="discount-amt"></span>
                 </div>
-                <!-- 後台設定的優惠，點一下套用 -->
-                <div class="discount-presets" id="discountPresets" hidden></div>
 
                 <!-- 銷售人員：點了跳出「誰來結帳」選人（下拉選單藏起來，存名單和選到的人） -->
                 <div class="cart-row clickable" onclick="openStaffPicker()">
@@ -484,6 +492,18 @@
             <p class="hint-text">新增後前台、後台會同時出現；圖片、排序請到後台設定。</p>
             <button class="checkout-btn" id="npSaveBtn" onclick="saveNewProduct()">💾 新增商品</button>
             <div id="npMessage"></div>
+        </div>
+    </div>
+
+    <!-- 選擇折扣：上下滑動，點一下套用 -->
+    <div id="discountModal" class="modal-overlay" hidden onclick="if (event.target === this) closeDiscountEdit()">
+        <div class="modal-card discount-card">
+            <div class="modal-head">
+                <h3>🏷️ 選擇折扣</h3>
+                <button class="icon-btn" onclick="closeDiscountEdit()">✕</button>
+            </div>
+            <div class="discount-presets" id="discountPresets"></div>
+            <button class="small-btn ghost no-discount" onclick="clearDiscount()">不使用折扣</button>
         </div>
     </div>
 
@@ -1289,7 +1309,7 @@
         }
 
         function editDiscount() {
-            const panel = document.getElementById('discountPresets');
+            const panel = document.getElementById('discountModal');
             // 再按一次就收起來
             if (!panel.hidden) return closeDiscountEdit();
             renderDiscountPresets();
@@ -1299,7 +1319,7 @@
         }
 
         function closeDiscountEdit() {
-            document.getElementById('discountPresets').hidden = true;
+            document.getElementById('discountModal').hidden = true;
             customPresetId = null;
         }
 
@@ -1314,15 +1334,15 @@
         function renderDiscountPresets() {
             const subtotal = subtotalOf();
             const panel = document.getElementById('discountPresets');
-            // 優惠排成一排，左右滑動選
-            const scrollLeft = panel.querySelector('.preset-scroll')?.scrollLeft || 0;
+            // 優惠清單，上下滑動選
+            const scrollTop = panel.querySelector(".preset-scroll")?.scrollTop || 0;
             panel.innerHTML = `<div class="preset-scroll">${allPresets().map(d => {
                 const short = d.min_spend && subtotal < d.min_spend;
                 return `<button class="preset-chip ${discount && discount.id === d.id ? 'active' : ''}" ${short ? 'disabled' : ''}
                     onclick="applyPreset(${d.id})" title="${esc(d.note || '')}">
                     ${esc(d.name)}<small>${discountName(d)}${d.min_spend ? `・滿${d.min_spend.toLocaleString()}` : ''}</small></button>`;
             }).join('')}</div>`;
-            panel.querySelector('.preset-scroll').scrollLeft = scrollLeft;
+            panel.querySelector(".preset-scroll").scrollTop = scrollTop;
             // 「結帳時自己輸入金額」的優惠：點了之後在下面輸入要折多少
             const custom = allPresets().find(d => d.id === customPresetId);
             if (custom) {
@@ -1339,14 +1359,6 @@
         }
 
         let customPresetId = null;   // 正在輸入金額的「自己輸入」優惠
-
-        // 電腦用滑鼠滾輪也能左右捲動優惠
-        document.addEventListener('wheel', (e) => {
-            const row = e.target.closest && e.target.closest('.preset-scroll');
-            if (!row || row.scrollWidth <= row.clientWidth || Math.abs(e.deltaX) > Math.abs(e.deltaY)) return;
-            row.scrollLeft += e.deltaY;
-            e.preventDefault();
-        }, { passive: false });
 
         function applyPreset(id) {
             const d = allPresets().find(x => x.id === id);
@@ -1439,7 +1451,7 @@
             document.getElementById('discountLabel').textContent = !discount ? '折扣'
                 : (discount.name ? `${discount.name}（${discountName(discount)}）` : `折扣：${discountName(discount)}`)
                   + (discount.min_spend && totalAmount < discount.min_spend ? `　未達滿 ${discount.min_spend.toLocaleString()}` : '');
-            if (!document.getElementById('discountPresets').hidden) renderDiscountPresets();
+            if (!document.getElementById('discountModal').hidden) renderDiscountPresets();
             document.getElementById('discountAmount').textContent = off ? `-NT$${off.toLocaleString()}` : '';
             document.getElementById('totalAmount').textContent = `NT$${(totalAmount - off).toLocaleString()}`;
         }
