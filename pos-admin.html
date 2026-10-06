@@ -43,7 +43,7 @@
         button.danger:hover { background: #e03131; }
         button:disabled { opacity: 0.4; cursor: not-allowed; }
         .hint { font-size: 12px; color: #999; margin-top: 10px; }
-        #productForm.editing { border-color: #667eea; background: #f7f8ff; }
+        #productForm.editing, #discountForm.editing { border-color: #667eea; background: #f7f8ff; }
         [hidden] { display: none !important; }
         .thumb { width: 44px; height: 44px; border: 1px dashed #ccc; border-radius: 6px; display: flex; align-items: center; justify-content: center; cursor: pointer; overflow: hidden; background: #fafafa; font-size: 18px; }
         .thumb:hover { border-color: #667eea; }
@@ -114,6 +114,7 @@
             <button class="tab-btn" onclick="showTab('sales')">💰 交易紀錄</button>
             <button class="tab-btn" onclick="showTab('staff')">👥 員工統計</button>
             <button class="tab-btn" onclick="showTab('customers')">👥 顧客</button>
+            <button class="tab-btn" onclick="showTab('discounts')">🏷️ 折扣優惠</button>
             <button class="tab-btn" onclick="showTab('stocktake')">📋 盤點紀錄</button>
             <button class="tab-btn" onclick="showTab('closes')">📋 小結紀錄</button>
             <button class="tab-btn" onclick="showTab('attendance')">🕐 打卡紀錄</button>
@@ -139,6 +140,31 @@
                 <tbody></tbody>
             </table>
             <p class="hint">顧客在前台收銀台的「👤 搜尋 / 新增顧客」建檔，也可以用「⬆️ 匯入顧客」從 Excel 匯入。購買次數和累計消費包含舊系統匯入的紀錄。刪除顧客不會刪掉過去的銷售紀錄。</p>
+        </div>
+
+        <!-- 折扣優惠 -->
+        <div id="discounts" class="content">
+            <h2>折扣優惠</h2>
+            <div class="section" id="discountForm">
+                <h3 id="discountFormTitle">➕ 新增優惠</h3>
+                <div class="input-group">
+                    <input type="text" id="dcName" maxlength="50" placeholder="優惠名稱（例：會員 9 折、滿千折百）">
+                    <select id="dcType" onchange="updateDcPlaceholder()">
+                        <option value="amount">減金額</option>
+                        <option value="percent">打折</option>
+                    </select>
+                    <input type="number" id="dcValue" min="0" step="any" placeholder="減多少元，例：100">
+                    <input type="number" id="dcMin" min="0" placeholder="滿多少才能用（沒有就空白）">
+                    <input type="text" id="dcNote" maxlength="200" placeholder="備註（選填，例：限週末）">
+                </div>
+                <button id="dcSaveBtn" onclick="saveDiscount()">💾 新增優惠</button>
+                <button class="secondary" id="dcCancelBtn" hidden onclick="resetDiscountForm()">取消修改</button>
+            </div>
+            <table id="discountTable">
+                <thead><tr><th class="sort-col">排序</th><th>優惠名稱</th><th>折扣</th><th>使用條件</th><th>備註</th><th>狀態</th><th></th></tr></thead>
+                <tbody></tbody>
+            </table>
+            <p class="hint">「上架中」的優惠會出現在前台購物車的「🏷️ 折扣」，店員直接點選就好；有設定滿額的，金額不到不能選。打折：9 折填 9、85 折填 85。前台還是可以手動輸入其他折扣。</p>
         </div>
 
         <!-- 打卡設定 -->
@@ -423,6 +449,124 @@
             else if (tabName === 'punchSettings') loadPunchSettings();
             else if (tabName === 'customers') loadCustomers();
             else if (tabName === 'closes') loadCloses();
+            else if (tabName === 'discounts') loadDiscounts();
+        }
+
+        // ============ 折扣優惠 ============
+        let discountList = [];
+        let editingDiscountId = null;
+        const discountText = (d) => d.type === 'amount' ? `減 NT$${Number(d.value).toLocaleString()}` : `${d.value} 折`;
+
+        async function loadDiscounts() {
+            try {
+                discountList = (await api('/api/admin/discounts')).data;
+                renderDiscounts();
+            } catch (error) {
+                alert('載入優惠失敗: ' + error.message);
+            }
+        }
+
+        function renderDiscounts() {
+            const tbody = document.querySelector('#discountTable tbody');
+            tbody.innerHTML = discountList.length ? discountList.map((d, i) => `
+                <tr>
+                    <td class="sort-cell">
+                        <button class="move-btn" onclick="moveDiscount(${i}, -1)" ${i === 0 ? 'disabled' : ''}>▲</button>
+                        <button class="move-btn" onclick="moveDiscount(${i}, 1)" ${i === discountList.length - 1 ? 'disabled' : ''}>▼</button>
+                    </td>
+                    <td><b>${escHtml(d.name)}</b></td>
+                    <td style="color:#e03131; font-weight:bold">${discountText(d)}</td>
+                    <td>${d.min_spend ? `滿 NT$${d.min_spend.toLocaleString()}` : '無'}</td>
+                    <td>${escHtml(d.note || '')}</td>
+                    <td><button class="status-toggle ${d.active ? 'on' : 'off'}" onclick="toggleDiscount(${d.id}, ${!d.active})">${d.active ? '上架中' : '下架中'}</button></td>
+                    <td style="white-space:nowrap">
+                        <button class="row-btn" onclick="editDiscount(${d.id})">✏️ 修改</button>
+                        <button class="row-btn danger" onclick="deleteDiscount(${d.id})">🗑 刪除</button>
+                    </td>
+                </tr>`).join('') : '<tr><td colspan="7" style="color:#999">還沒有優惠，請在上面新增</td></tr>';
+        }
+
+        function updateDcPlaceholder() {
+            document.getElementById('dcValue').placeholder = document.getElementById('dcType').value === 'amount'
+                ? '減多少元，例：100' : '打幾折：9 折填 9、85 折填 85';
+        }
+
+        function resetDiscountForm() {
+            editingDiscountId = null;
+            ['dcName', 'dcValue', 'dcMin', 'dcNote'].forEach(id => document.getElementById(id).value = '');
+            document.getElementById('dcType').value = 'amount';
+            updateDcPlaceholder();
+            document.getElementById('discountFormTitle').textContent = '➕ 新增優惠';
+            document.getElementById('dcSaveBtn').textContent = '💾 新增優惠';
+            document.getElementById('dcCancelBtn').hidden = true;
+            document.getElementById('discountForm').classList.remove('editing');
+        }
+
+        function editDiscount(id) {
+            const d = discountList.find(x => x.id === id);
+            if (!d) return;
+            editingDiscountId = id;
+            document.getElementById('dcName').value = d.name;
+            document.getElementById('dcType').value = d.type;
+            document.getElementById('dcValue').value = d.value;
+            document.getElementById('dcMin').value = d.min_spend || '';
+            document.getElementById('dcNote').value = d.note || '';
+            updateDcPlaceholder();
+            document.getElementById('discountFormTitle').textContent = `✏️ 修改優惠：${d.name}`;
+            document.getElementById('dcSaveBtn').textContent = '💾 儲存修改';
+            document.getElementById('dcCancelBtn').hidden = false;
+            document.getElementById('discountForm').classList.add('editing');
+            document.getElementById('dcName').focus();
+        }
+
+        async function saveDiscount() {
+            const val = (id) => document.getElementById(id).value.trim();
+            const old = discountList.find(x => x.id === editingDiscountId);
+            const body = { id: editingDiscountId, name: val('dcName'), type: val('dcType'), value: val('dcValue'),
+                min_spend: val('dcMin'), note: val('dcNote'), active: old ? old.active : true };
+            if (!body.name) return alert('請填優惠名稱');
+            if (!body.value) return alert(body.type === 'amount' ? '請填減多少元' : '請填打幾折');
+            try {
+                await postJson('/api/admin/discounts', body);
+                resetDiscountForm();
+                await loadDiscounts();
+            } catch (error) {
+                alert('儲存失敗: ' + error.message);
+            }
+        }
+
+        async function toggleDiscount(id, active) {
+            try {
+                await postJson('/api/admin/discounts/active', { id, active });
+                await loadDiscounts();
+            } catch (error) {
+                alert('更新失敗: ' + error.message);
+            }
+        }
+
+        async function deleteDiscount(id) {
+            const d = discountList.find(x => x.id === id);
+            if (!d || !confirm(`確定要刪除「${d.name}」？\n（過去用這個優惠的交易紀錄不受影響）`)) return;
+            try {
+                await postJson('/api/admin/discounts/delete', { id });
+                if (editingDiscountId === id) resetDiscountForm();
+                await loadDiscounts();
+            } catch (error) {
+                alert('刪除失敗: ' + error.message);
+            }
+        }
+
+        async function moveDiscount(index, dir) {
+            const to = index + dir;
+            if (to < 0 || to >= discountList.length) return;
+            [discountList[index], discountList[to]] = [discountList[to], discountList[index]];
+            renderDiscounts();
+            try {
+                await postJson('/api/admin/discounts/reorder', { ids: discountList.map(d => d.id) });
+            } catch (error) {
+                alert('排序儲存失敗: ' + error.message);
+                loadDiscounts();
+            }
         }
 
         // ============ 小結紀錄 ============

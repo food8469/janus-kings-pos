@@ -225,6 +225,12 @@
         .cart-bottom { border-top: 1px solid #eee; }
         .discount-amt { color: #e03131; font-weight: bold; }
         .discount-edit select { flex: 0 0 auto; width: 90px; }
+        .discount-presets { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 4px 2px; }
+        .preset-chip { border: 1.5px solid #ffa8a8; background: #fff5f5; color: #c92a2a; border-radius: 16px; padding: 6px 12px; font-size: 13px; font-family: inherit; cursor: pointer; text-align: left; }
+        .preset-chip small { color: #999; margin-left: 4px; }
+        .preset-chip.active { background: #e03131; color: white; border-color: #e03131; }
+        .preset-chip.active small { color: #ffe3e3; }
+        .preset-chip:disabled { opacity: 0.45; cursor: not-allowed; }
         .staff-select { max-width: 60%; }
         .small-btn { padding: 8px 12px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; font-size: 13px; white-space: nowrap; font-family: inherit; }
         .small-btn.ghost { background: #f1f3f5; color: #555; }
@@ -360,6 +366,8 @@
                     <span><span class="row-icon">🏷️</span><span id="discountLabel">新增整單折扣</span></span>
                     <span id="discountAmount" class="discount-amt"></span>
                 </div>
+                <!-- 後台設定的優惠，點一下套用 -->
+                <div class="discount-presets" id="discountPresets" hidden></div>
                 <div class="cart-row discount-edit" id="discountEdit" hidden>
                     <select id="discountType" onchange="updateDiscountPlaceholder()">
                         <option value="amount">減金額</option>
@@ -671,6 +679,7 @@
             document.getElementById('cartStoreLabel').textContent = `📍 ${punchDevice.store}門市`;
             loadProducts();
             loadStaff();
+            loadDiscountPresets();
         }
 
         // 店長在鎖定畫面輸入後台帳密，登記這台裝置
@@ -1235,12 +1244,56 @@
         }
 
         // ---- 整單折扣：減金額，或打折（9 折填 9、85 折填 85）----
-        let discount = null;   // { type: 'amount' | 'percent', value }
+        let discount = null;   // { type: 'amount' | 'percent', value, name?, min_spend?, id? }
+        let discountPresets = [];   // 後台「折扣優惠」設定的優惠
+
+        async function loadDiscountPresets() {
+            try {
+                const res = await posFetch('/api/discounts');
+                if (res.ok) discountPresets = (await res.json()).data || [];
+            } catch (e) { /* 載入失敗就只能手動輸入 */ }
+        }
 
         function editDiscount() {
-            document.getElementById('discountEdit').hidden = false;
+            const edit = document.getElementById('discountEdit');
+            // 再按一次就收起來
+            if (!edit.hidden) return closeDiscountEdit();
+            renderDiscountPresets();
+            document.getElementById('discountPresets').hidden = !discountPresets.length;
+            edit.hidden = false;
             updateDiscountPlaceholder();
-            document.getElementById('discountValue').focus();
+            loadDiscountPresets().then(() => {
+                renderDiscountPresets();
+                document.getElementById('discountPresets').hidden = edit.hidden || !discountPresets.length;
+            });
+        }
+
+        function closeDiscountEdit() {
+            document.getElementById('discountEdit').hidden = true;
+            document.getElementById('discountPresets').hidden = true;
+        }
+
+        const subtotalOf = () => Object.values(cart).reduce((sum, i) => sum + i.qty * i.price, 0);
+        const discountName = (d) => d.type === 'amount' ? `減 NT$${d.value.toLocaleString()}` : `${d.value} 折`;
+
+        function renderDiscountPresets() {
+            const subtotal = subtotalOf();
+            document.getElementById('discountPresets').innerHTML = discountPresets.map(d => {
+                const short = d.min_spend && subtotal < d.min_spend;
+                return `<button class="preset-chip ${discount && discount.id === d.id ? 'active' : ''}" ${short ? 'disabled' : ''}
+                    onclick="applyPreset(${d.id})" title="${esc(d.note || '')}">
+                    ${esc(d.name)}<small>${discountName(d)}${d.min_spend ? `・滿${d.min_spend.toLocaleString()}` : ''}</small></button>`;
+            }).join('');
+        }
+
+        function applyPreset(id) {
+            const d = discountPresets.find(x => x.id === id);
+            if (!d) return;
+            // 再點一次同一個優惠 = 取消
+            if (discount && discount.id === id) return clearDiscount();
+            discount = { id: d.id, name: d.name, type: d.type, value: d.value, min_spend: d.min_spend || 0 };
+            closeDiscountEdit();
+            renderCart();
         }
 
         function updateDiscountPlaceholder() {
@@ -1260,19 +1313,20 @@
             if (type === 'amount' && !Number.isInteger(value)) return showMessage('折扣金額請填整數', 'error');
             if (type === 'percent' && !(discountRate(value) > 0 && discountRate(value) < 1)) return showMessage('打折請填 1～99，例如 9 折填 9', 'error');
             discount = { type, value };
-            document.getElementById('discountEdit').hidden = true;
+            closeDiscountEdit();
             renderCart();
         }
 
         function clearDiscount() {
             discount = null;
             document.getElementById('discountValue').value = '';
-            document.getElementById('discountEdit').hidden = true;
+            closeDiscountEdit();
             renderCart();
         }
 
         function discountOf(subtotal) {
             if (!discount || subtotal <= 0) return 0;
+            if (discount.min_spend && subtotal < discount.min_spend) return 0;   // 未達滿額
             const d = discount.type === 'amount' ? discount.value : Math.round(subtotal * (1 - discountRate(discount.value)));
             return Math.min(Math.max(d, 0), subtotal);
         }
@@ -1317,7 +1371,9 @@
             document.getElementById('cartCount').textContent = `(${totalQty}件)`;
             document.getElementById('subtotal').textContent = `NT$${totalAmount.toLocaleString()}`;
             document.getElementById('discountLabel').textContent = !discount ? '新增整單折扣'
-                : discount.type === 'amount' ? `整單折扣：減 NT$${discount.value.toLocaleString()}` : `整單折扣：${discount.value} 折`;
+                : (discount.name ? `${discount.name}（${discountName(discount)}）` : `整單折扣：${discountName(discount)}`)
+                  + (discount.min_spend && totalAmount < discount.min_spend ? `　未達滿 ${discount.min_spend.toLocaleString()}` : '');
+            if (!document.getElementById('discountPresets').hidden) renderDiscountPresets();
             document.getElementById('discountAmount').textContent = off ? `-NT$${off.toLocaleString()}` : '';
             document.getElementById('totalAmount').textContent = `NT$${(totalAmount - off).toLocaleString()}`;
         }

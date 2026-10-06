@@ -107,6 +107,18 @@ async function initDb() {
       created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS shift_closes_store_idx ON shift_closes (store, end_at);
+    -- 折扣優惠（後台設定，前台結帳時點選）
+    -- type = amount：減 value 元；type = percent：打 value 折（9 = 9 折、85 = 85 折）
+    CREATE TABLE IF NOT EXISTS discounts (
+      id         SERIAL PRIMARY KEY,
+      name       TEXT NOT NULL,
+      type       TEXT NOT NULL CHECK (type IN ('amount', 'percent')),
+      value      NUMERIC NOT NULL,
+      min_spend  INTEGER NOT NULL DEFAULT 0,
+      active     BOOLEAN NOT NULL DEFAULT TRUE,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      note       TEXT
+    );
     -- 前台圖卡圖片：key = 'cat:分類' 或 'series:分類|系列'
     CREATE TABLE IF NOT EXISTS tile_images (
       key     TEXT PRIMARY KEY,
@@ -337,6 +349,75 @@ app.post('/api/admin/closes/delete', requireAdmin, async (req, res) => {
   const { rowCount } = await pool.query('DELETE FROM shift_closes WHERE id = $1', [toInt(req.body?.id, '小結')]);
   if (!rowCount) return res.status(404).json({ status: 'error', message: '找不到這筆小結' });
   res.json({ status: 'success', message: '已刪除這筆小結' });
+});
+
+// ============ 折扣優惠 ============
+const toDiscount = (r) => ({ ...r, value: Number(r.value) });
+
+// 前台：上架中的優惠
+app.get('/api/discounts', requireDevice, async (req, res) => {
+  const { rows } = await pool.query('SELECT * FROM discounts WHERE active ORDER BY sort_order, id');
+  res.json({ status: 'success', data: rows.map(toDiscount) });
+});
+
+// 後台：全部優惠
+app.get('/api/admin/discounts', requireAdmin, async (req, res) => {
+  const { rows } = await pool.query('SELECT * FROM discounts ORDER BY sort_order, id');
+  res.json({ status: 'success', data: rows.map(toDiscount) });
+});
+
+// 後台：新增（沒有 id）或修改（有 id）優惠
+app.post('/api/admin/discounts', requireAdmin, async (req, res) => {
+  const b = req.body || {};
+  const name = String(b.name || '').trim().slice(0, 50);
+  const type = b.type === 'percent' ? 'percent' : 'amount';
+  const value = Number(b.value);
+  const minSpend = toInt(b.min_spend, '滿額門檻') ?? 0;
+  const note = String(b.note || '').trim().slice(0, 200) || null;
+  const active = b.active === undefined ? true : !!b.active;
+  if (!name) return res.status(400).json({ status: 'error', message: '請填優惠名稱' });
+  if (type === 'amount' && !(Number.isInteger(value) && value > 0)) {
+    return res.status(400).json({ status: 'error', message: '折抵金額請填大於 0 的整數' });
+  }
+  const rate = value < 10 ? value / 10 : value / 100;
+  if (type === 'percent' && !(rate > 0 && rate < 1)) {
+    return res.status(400).json({ status: 'error', message: '打折請填 1～99，例如 9 折填 9、85 折填 85' });
+  }
+
+  if (b.id) {
+    const { rows: [d] } = await pool.query(
+      `UPDATE discounts SET name = $2, type = $3, value = $4, min_spend = $5, note = $6, active = $7
+       WHERE id = $1 RETURNING *`, [Number(b.id), name, type, value, minSpend, note, active]);
+    if (!d) return res.status(404).json({ status: 'error', message: '找不到這個優惠' });
+    return res.json({ status: 'success', message: '優惠已更新', data: toDiscount(d) });
+  }
+  const { rows: [d] } = await pool.query(
+    `INSERT INTO discounts (name, type, value, min_spend, note, active, sort_order)
+     VALUES ($1, $2, $3, $4, $5, $6, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM discounts)) RETURNING *`,
+    [name, type, value, minSpend, note, active]);
+  res.json({ status: 'success', message: '優惠已新增', data: toDiscount(d) });
+});
+
+// 後台：上架 / 停用
+app.post('/api/admin/discounts/active', requireAdmin, async (req, res) => {
+  const { rowCount } = await pool.query('UPDATE discounts SET active = $2 WHERE id = $1', [Number(req.body?.id), !!req.body?.active]);
+  if (!rowCount) return res.status(404).json({ status: 'error', message: '找不到這個優惠' });
+  res.json({ status: 'success', message: req.body?.active ? '已啟用' : '已停用' });
+});
+
+// 後台：排序（ids 依新順序）
+app.post('/api/admin/discounts/reorder', requireAdmin, async (req, res) => {
+  const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter(Number.isInteger);
+  for (let i = 0; i < ids.length; i++) {
+    await pool.query('UPDATE discounts SET sort_order = $2 WHERE id = $1', [ids[i], i + 1]);
+  }
+  res.json({ status: 'success', message: '排序已儲存' });
+});
+
+app.post('/api/admin/discounts/delete', requireAdmin, async (req, res) => {
+  const { rowCount } = await pool.query('DELETE FROM discounts WHERE id = $1', [Number(req.body?.id)]);
+  if (!rowCount) return res.status(404).json({ status: 'error', message: '找不到這個優惠' });
+  res.json({ status: 'success', message: '優惠已刪除' });
 });
 
 // ============ 前台圖卡圖片（分類卡、系列卡）============
