@@ -597,8 +597,9 @@
 
             // 大分類按鈕（預設選第一個；分類被刪掉時也回到第一個）
             // 有些分類在前台合併成同一個按鈕（見 MERGED_TABS）
-            const categories = [...new Set(seriesData.map(s => tabOf(s.category)))];
-            if (!categories.includes(currentCategory)) currentCategory = categories[0];
+            // 最前面是「全部」，預設也顯示全部
+            const categories = [ALL_TAB, ...new Set(seriesData.map(s => tabOf(s.category)))];
+            if (!categories.includes(currentCategory)) currentCategory = ALL_TAB;
             categories.forEach(c => {
                 const btn = document.createElement('button');
                 btn.className = 'category-tab' + (c === currentCategory ? ' active' : '');
@@ -607,7 +608,7 @@
                 tabs.appendChild(btn);
             });
 
-            const list = seriesData.filter(s => tabOf(s.category) === currentCategory);
+            const list = seriesData.filter(s => currentCategory === ALL_TAB || tabOf(s.category) === currentCategory);
             // 同一個原本分類的卡片排在一起（保持後台排好的順序）
             const catOrder = [...new Set(list.map(s => s.category))];
             list.sort((a, b) => catOrder.indexOf(a.category) - catOrder.indexOf(b.category));
@@ -640,6 +641,7 @@
 
         // 前台合併顯示的分類：{ 後台的大分類: 前台按鈕名稱 }。後台不受影響
         const MERGED_TABS = { '整片系列': '整片', '頂規整片': '整片' };
+        const ALL_TAB = '全部';
         const tabOf = (category) => MERGED_TABS[category] || category;
 
         function selectSeries(series) {
