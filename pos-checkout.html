@@ -2120,7 +2120,7 @@
         async function loadTransfers() {
             document.getElementById('tfView').hidden = false;
             document.getElementById('tfForm').hidden = true;
-            document.getElementById('tfNewBtn').textContent = `📝 向${otherStore()}叫貨`;
+            document.getElementById('tfNewBtn').textContent = "📝 叫貨";
             const box = document.getElementById('tfList');
             box.textContent = '載入中…';
             try {
@@ -2136,7 +2136,7 @@
                     return `
                     <div class="order-card" onclick="toggleTransfer(this, ${t.id})" style="cursor:pointer">
                         <div class="order-head">
-                            <span>#${t.id}　${esc(t.to_store)} 向 ${esc(t.from_store)} 叫貨</span>
+                            <span>#${t.id}　${esc(t.to_store)}叫貨</span>
                             <span class="tf-status" style="background:${color}">${label}</span>
                         </div>
                         <div class="order-line"><span>📅 ${mdhm(t.requested_at)}　${esc(t.requested_by || '')}</span><span>${t.items} 項・${t.req_total} 個</span></div>
@@ -2189,7 +2189,7 @@
             tfMode = 'request';
             tfOrder = null;
             fillTransferStaff();
-            document.getElementById('tfFormHead').innerHTML = `📝 <b>${esc(myStore())}</b> 向 <b>${esc(otherStore())}</b> 叫貨<div class="hint-text">填要叫幾個，不需要的留空。送出後等${esc(otherStore())}出貨。</div>`;
+            document.getElementById('tfFormHead').innerHTML = `📝 <b>${esc(myStore())}</b> 叫貨<div class="hint-text">填要叫幾個，不需要的留空。送出後等${esc(otherStore())}出貨。</div>`;
             document.getElementById('tfStaffLabel').textContent = '叫貨人';
             document.getElementById('tfHint').textContent = '';
             document.getElementById('tfSaveBtn').textContent = `📝 送出叫貨`;
@@ -2269,7 +2269,7 @@
                 if (!items.length) return fail('請至少填一個商品要叫幾個');
                 path = '/api/pos/transfers';
                 body = { items, staff, note };
-                confirmText = `向${otherStore()}叫貨 ${items.length} 項、共 ${items.reduce((s, i) => s + i.qty, 0)} 個？`;
+                confirmText = `叫貨 ${items.length} 項、共 ${items.reduce((s, i) => s + i.qty, 0)} 個？`;
             } else {
                 const items = inputs.map(i => ({ id: Number(i.dataset.key), qty: i.value === '' ? 0 : Number(i.value) }));
                 const total = items.reduce((s, i) => s + i.qty, 0);

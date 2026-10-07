@@ -627,7 +627,7 @@
                     ? `<input type="number" class="cell-input" min="0" data-item="${i.id}" value="${base ?? 0}">`
                     : (i[field] ?? '-');
                 cell.innerHTML = `
-                    <div class="detail-title">#${t.id}　${escHtml(t.to_store)} 向 ${escHtml(t.from_store)} 叫貨</div>
+                    <div class="detail-title">#${t.id}　${escHtml(t.to_store)}叫貨（${escHtml(t.from_store)}出貨）</div>
                     <table class="detail-table">
                         <thead><tr><th>分類</th><th>商品</th><th>叫貨</th><th>出貨</th><th>進貨</th></tr></thead>
                         <tbody>${t.items.map(i => `
@@ -728,7 +728,7 @@
                 <h1>野烏金 調貨單</h1>
                 <div>列印時間：${twDateTime(new Date())}</div>
                 ${details.map(t => `<div class="block">
-                    <h2>#${t.id}　${escHtml(t.to_store)} 向 ${escHtml(t.from_store)} 叫貨　【${TF_STATUS[t.status]?.[0] || t.status}】</h2>
+                    <h2>#${t.id}　${escHtml(t.to_store)}叫貨（${escHtml(t.from_store)}出貨）　【${TF_STATUS[t.status]?.[0] || t.status}】</h2>
                     <div class="meta">叫貨：${twDateTime(t.requested_at)} ${escHtml(t.requested_by || '')}
                         ${t.shipped_at ? `　出貨：${twDateTime(t.shipped_at)} ${escHtml(t.shipped_by || '')}` : ''}
                         ${t.received_at ? `　進貨：${twDateTime(t.received_at)} ${escHtml(t.received_by || '')}` : ''}</div>

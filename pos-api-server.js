@@ -1315,10 +1315,10 @@ async function getTransfer(id, client = pool) {
   return { ...t, items };
 }
 
-// 叫貨：toStore 向 fromStore 要貨（還不動庫存）
+// 叫貨：toStore 叫貨，由另一家門市出貨（還不動庫存）
 async function createTransfer(b, toStore) {
-  const fromStore = STORES.find(s => s !== toStore);
   if (!STORES.includes(toStore)) throw new InputError('請選擇叫貨的門市');
+  const fromStore = STORES.find(s => s !== toStore);
   const list = (Array.isArray(b.items) ? b.items : [])
     .map(i => ({ id: Number(i.product_id), qty: toInt(i.qty, '數量') }))
     .filter(i => Number.isInteger(i.id) && i.qty);
@@ -1419,7 +1419,7 @@ app.get('/api/admin/transfers/:id', requireAdmin, async (req, res) => {
 });
 app.post('/api/admin/transfers', requireAdmin, async (req, res) => {
   const t = await createTransfer(req.body || {}, req.body?.to_store);
-  res.json({ status: 'success', message: `已向${t.from_store}叫貨`, data: t });
+  res.json({ status: 'success', message: `已叫貨，等${t.from_store}出貨`, data: t });
 });
 app.post('/api/admin/transfers/:id/ship', requireAdmin, async (req, res) => {
   res.json({ status: 'success', message: await advanceTransfer(toInt(req.params.id, '調貨單'), 'ship', req.body || {}, null) });
@@ -1443,7 +1443,7 @@ app.get('/api/pos/transfers/:id', requireDevice, async (req, res) => {
 });
 app.post('/api/pos/transfers', requireDevice, async (req, res) => {
   const t = await createTransfer(req.body || {}, deviceStore(req));
-  res.json({ status: 'success', message: `已向${t.from_store}叫貨，等${t.from_store}出貨`, data: t });
+  res.json({ status: 'success', message: `已叫貨，等${t.from_store}出貨`, data: t });
 });
 app.post('/api/pos/transfers/:id/ship', requireDevice, async (req, res) => {
   res.json({ status: 'success', message: await advanceTransfer(toInt(req.params.id, '調貨單'), 'ship', req.body || {}, deviceStore(req)) });
