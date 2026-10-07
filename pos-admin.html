@@ -309,6 +309,10 @@
                     <input type="text" id="newCategory" placeholder="大分類（例：試吃）" list="categoryList">
                     <input type="text" id="newSeries" placeholder="系列（例：試吃包）" list="seriesList">
                     <input type="text" id="newName" placeholder="口味/重量（例：鹽味、五兩）">
+                    <label id="batchClearNameWrap" hidden style="display: flex; align-items: center; gap: 6px; font-size: 14px; cursor: pointer;">
+                        <input type="checkbox" id="batchClearName" style="width: 18px; height: 18px;" onchange="document.getElementById('newName').disabled = this.checked">
+                        清除口味/重量（只留系列名稱）
+                    </label>
                     <input type="number" id="newPrice" placeholder="價格">
                     <input type="number" id="newGaoxiong" placeholder="高雄庫存">
                     <input type="number" id="newTaizhong" placeholder="台中庫存">
@@ -1611,13 +1615,17 @@
             document.getElementById('productFormHint').textContent =
                 n === 0 ? '只填口味/重量就能新增，其他沒填的之後可以補。要修改既有商品，勾選下面表格的商品。'
                 : p ? '改好後按「保存修改」。不改了按「取消勾選」回到新增。'
-                : '空白的欄位不會改。例：只填「高雄庫存 20」→ 勾選的商品高雄庫存都變 20。口味/重量不能一起改。';
+                : '空白的欄位不會改。例：只填「高雄庫存 20」→ 勾選的商品高雄庫存都變 20。勾「清除口味/重量」→ 例：血腥瑪麗-試吃 變成 血腥瑪麗。';
             document.getElementById('createButtons').hidden = n > 0;
             document.getElementById('editButtons').hidden = n === 0;
             document.getElementById('saveSelectionBtn').textContent = n > 1 ? `✅ 套用到 ${n} 項商品` : '💾 保存修改';
             document.getElementById('batchStockMode').hidden = n < 2;
-            document.getElementById('newName').disabled = n > 1;
-            document.getElementById('newName').placeholder = n > 1 ? '（多項時不能改口味/重量）' : '口味/重量（例：鹽味、五兩）';
+            // 多項時口味/重量：填了 → 全部改成一樣；勾「清除」→ 全部拿掉
+            const clearBox = document.getElementById('batchClearName');
+            document.getElementById('batchClearNameWrap').hidden = n < 2;
+            if (n < 2) clearBox.checked = false;
+            document.getElementById('newName').disabled = n > 1 && clearBox.checked;
+            document.getElementById('newName').placeholder = n > 1 ? '口味/重量（填了會全部改成一樣）' : '口味/重量（例：鹽味、五兩）';
         }
 
         // 勾 1 項 = 直接改那個商品；勾多項 = 批次套用
@@ -1631,12 +1639,14 @@
             const mode = val('batchStockMode');
             const gx = num('newGaoxiong'), tz = num('newTaizhong'), price = num('newPrice');
             const category = val('newCategory'), series = val('newSeries');
+            const clearName = document.getElementById('batchClearName').checked;
+            const name = clearName ? '' : val('newName');   // '' = 清除；undefined = 不改
 
             if ([gx, tz, price].some(n => n !== null && (!Number.isInteger(n) || n < 0))) {
                 alert('庫存和價格請填 0 以上的整數');
                 return;
             }
-            if (gx === null && tz === null && price === null && !category && !series) {
+            if (gx === null && tz === null && price === null && !category && !series && !name && !clearName) {
                 alert('請至少填一個要修改的欄位');
                 return;
             }
@@ -1649,6 +1659,8 @@
                 price !== null && `價格改為 ${price}`,
                 category && `大分類改為「${category}」`,
                 series && `系列改為「${series}」`,
+                name && `口味/重量改為「${name}」`,
+                clearName && '清除口味/重量（只留系列名稱）',
             ].filter(Boolean);
             if (!confirm(`確定要修改勾選的 ${list.length} 項商品？\n\n` + changes.join('\n'))) return;
 
@@ -1661,9 +1673,10 @@
                             product_id: p.id, gaoxiong: newStock(p.gaoxiong, gx), taizhong: newStock(p.taizhong, tz)
                         });
                     }
-                    if (price !== null || category || series) {
+                    if (price !== null || category || series || name || clearName) {
                         await postJson('/api/products/update', {
-                            product_id: p.id, price: price ?? undefined, category: category || undefined, series: series || undefined
+                            product_id: p.id, price: price ?? undefined, category: category || undefined, series: series || undefined,
+                            name: clearName ? '' : name || undefined
                         });
                     }
                 } catch (error) {
