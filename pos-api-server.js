@@ -1323,14 +1323,17 @@ app.post('/api/products/create', requireAdmin, async (req, res) => {
 app.post('/api/products/update', requireAdmin, async (req, res) => {
   const { product_id, category, series, name, price, active } = req.body || {};
   const text = (v) => (v === undefined ? null : String(v).trim() || null);
+  // 口味/重量刻意清空（送空字串）→ 沒有口味/重量，品名跟系列一樣（例：血腥瑪麗-試吃 → 血腥瑪麗）
+  const clearName = name !== undefined && String(name).trim() === '';
   const { rows: [product] } = await pool.query(
     `UPDATE products
-     SET series = COALESCE($2, series), name = COALESCE($3, name),
+     SET series = COALESCE($2, series),
+         name = CASE WHEN $7 THEN COALESCE($2, series) ELSE COALESCE($3, name) END,
          price = COALESCE($4, price), active = COALESCE($5, active),
          category = COALESCE($6, category)
      WHERE id = $1 RETURNING *`,
     [product_id, text(series), text(name), toInt(price, '價格'),
-     typeof active === 'boolean' ? active : null, text(category)]);
+     typeof active === 'boolean' ? active : null, text(category), clearName]);
   if (!product) return res.status(404).json({ status: 'error', message: '商品不存在' });
   res.json({ status: 'success', message: '商品已更新', data: product });
 });
