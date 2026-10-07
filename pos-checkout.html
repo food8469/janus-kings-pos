@@ -646,7 +646,7 @@
                     </button>
                     <button class="menu-item" onclick="showMenuTab('transfer')">
                         <span class="menu-icon">🚚</span>
-                        <span><b>叫貨 / 出貨 / 進貨 <span id="transferBadge" class="menu-badge" hidden></span></b><small>門市之間調貨</small></span>
+                        <span><b>調貨 <span id="transferBadge" class="menu-badge" hidden></span></b><small>叫貨 → 出貨 → 進貨</small></span>
                     </button>
                     <button class="menu-item" onclick="showMenuTab('stocktake')">
                         <span class="menu-icon">📦</span>
@@ -2079,7 +2079,7 @@
 
         function showMenuTab(tab) {
             menuTab = tab;
-            const titles = { home: '☰ 選單', punch: '🕐 打卡', orders: '🧾 交易紀錄', close: '📋 小結', stocktake: '📦 盤點', transfer: '🚚 叫貨 / 出貨 / 進貨' };
+            const titles = { home: '☰ 選單', punch: '🕐 打卡', orders: '🧾 交易紀錄', close: '📋 小結', stocktake: '📦 盤點', transfer: '🚚 調貨' };
             document.getElementById('menuTitle').textContent = titles[tab];
             document.getElementById('menuBack').hidden = tab === 'home';
             document.getElementById('menuHome').hidden = tab !== 'home';

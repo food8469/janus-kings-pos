@@ -116,7 +116,7 @@
             <button class="tab-btn" onclick="showTab('customers')">👥 顧客</button>
             <button class="tab-btn" onclick="showTab('discounts')">🏷️ 折扣優惠</button>
             <button class="tab-btn" onclick="showTab('stocktake')">📋 盤點紀錄</button>
-            <button class="tab-btn" onclick="showTab('transfers')">🚚 叫貨 / 進貨</button>
+            <button class="tab-btn" onclick="showTab('transfers')">🚚 調貨</button>
             <button class="tab-btn" onclick="showTab('closes')">📋 小結紀錄</button>
             <button class="tab-btn" onclick="showTab('attendance')">🕐 打卡紀錄</button>
             <button class="tab-btn" onclick="showTab('punchSettings')">🔐 裝置與打卡設定</button>
@@ -422,7 +422,7 @@
 
         <!-- 叫貨 → 出貨 → 進貨 -->
         <div id="transfers" class="content">
-            <h2>叫貨 / 出貨 / 進貨</h2>
+            <h2>調貨</h2>
             <div class="filter-bar" style="align-items: center;">
                 <label>📅 <input type="date" id="tfFrom" onchange="loadTransfers()"></label>
                 <span>～</span>
@@ -448,7 +448,7 @@
                 <thead><tr><th>單號</th><th>叫貨時間</th><th>叫貨門市</th><th>出貨門市</th><th>狀態</th><th>叫 / 出 / 進</th><th>叫貨人</th><th>出貨</th><th>進貨</th><th></th></tr></thead>
                 <tbody></tbody>
             </table>
-            <p class="hint">門市在平板 ☰ →「🚚 叫貨 / 出貨 / 進貨」操作：叫貨門市叫貨 → 出貨門市按「出貨」（扣出貨門市庫存）→ 叫貨門市收到後按「進貨」（加叫貨門市庫存）。出貨或進貨數量跟叫貨不一樣會用紅字標出。已出貨但還沒進貨的單，在這裡取消會把出貨門市扣掉的庫存加回去。</p>
+            <p class="hint">門市在平板 ☰ →「🚚 調貨」操作：叫貨門市叫貨 → 出貨門市按「出貨」（扣出貨門市庫存）→ 叫貨門市收到後按「進貨」（加叫貨門市庫存）。出貨或進貨數量跟叫貨不一樣會用紅字標出。已出貨但還沒進貨的單，在這裡取消會把出貨門市扣掉的庫存加回去。</p>
         </div>
 
         <!-- 盤點紀錄 -->
