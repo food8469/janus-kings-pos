@@ -416,14 +416,57 @@
 
         <!-- 盤點紀錄 -->
         <div id="stocktake" class="content">
-            <h2>盤點紀錄（當前庫存）</h2>
-            <button onclick="loadStocktake()">🔄 重新整理</button>
+            <h2>盤點紀錄</h2>
+            <div class="filter-bar" style="align-items: center;">
+                <label>📅 <input type="date" id="stFrom" onchange="loadStocktake()"></label>
+                <span>～</span>
+                <label><input type="date" id="stTo" onchange="loadStocktake()"></label>
+                <button class="quick-range" onclick="setStocktakeRange('today')">今天</button>
+                <button class="quick-range" onclick="setStocktakeRange('week')">本週</button>
+                <button class="quick-range" onclick="setStocktakeRange('month')">本月</button>
+                <button class="quick-range" onclick="setStocktakeRange('lastMonth')">上個月</button>
+                <button class="quick-range" onclick="setStocktakeRange('all')">全部</button>
+            </div>
+            <div class="filter-bar" style="align-items: center; margin-top: 10px;">
+                <select id="stStore" onchange="loadStocktake()"><option value="">全部門市</option><option>高雄</option><option>台中</option></select>
+                <button onclick="openStocktakeForm()">📝 開始盤點</button>
+                <button onclick="loadStocktake()">🔄 重新整理</button>
+                <button class="secondary" onclick="exportStocktakes()">⬇️ 匯出 Excel</button>
+                <button class="secondary" onclick="printStocktakes()">🖨️ 列印</button>
+            </div>
+
+            <!-- 新增盤點 -->
+            <div id="stocktakeForm" class="section" hidden>
+                <h3>📝 新增盤點</h3>
+                <div class="input-group">
+                    <select id="stFormStore" onchange="renderStocktakeForm()"><option>高雄</option><option>台中</option></select>
+                    <input type="date" id="stFormDate" title="盤點日期">
+                    <input type="text" id="stFormStaff" maxlength="30" placeholder="盤點人">
+                    <input type="text" id="stFormNote" maxlength="500" placeholder="備註（選填）">
+                </div>
+                <div style="margin: 6px 0;">
+                    <button class="secondary" onclick="fillStocktakeSystem()">沒填的帶入系統數量</button>
+                    <button class="secondary" onclick="clearStocktakeForm()">全部清空</button>
+                </div>
+                <table id="stocktakeFormTable">
+                    <thead><tr><th>商品</th><th>系統數量</th><th>實際數量</th><th>差異</th></tr></thead>
+                    <tbody></tbody>
+                </table>
+                <label style="display: block; margin: 10px 0;"><input type="checkbox" id="stFormApply" checked style="width: auto;">
+                    儲存後把這家門市的庫存改成「實際數量」</label>
+                <button onclick="saveStocktake()">💾 儲存盤點</button>
+                <button class="secondary" onclick="closeStocktakeForm()">取消</button>
+                <p class="hint">實際數量沒填的商品不會記錄。系統數量以按下「儲存」那一刻的庫存為準。</p>
+            </div>
+
+            <div id="stocktakeSummaryBox" class="stat-box"></div>
             <table id="stocktakeTable">
                 <thead>
-                    <tr><th>商品</th><th>高雄</th><th>台中</th><th>合計</th><th>單價</th></tr>
+                    <tr><th>盤點日期</th><th>門市</th><th>盤點人</th><th>盤點品項</th><th>有差異</th><th>差異數量</th><th>差異金額</th><th>庫存</th><th>備註</th><th></th></tr>
                 </thead>
                 <tbody></tbody>
             </table>
+            <p class="hint">按「📋 明細 / ✏️ 編輯」可以看每個商品的系統數量、實際數量和差異，也能修改紀錄。修改或刪除盤點紀錄不會改動目前的庫存。</p>
         </div>
     </div>
 
@@ -2521,22 +2564,269 @@
             }
         }
 
+        // ============ 盤點紀錄 ============
+        let stocktakes = [];
+        let stocktakeProducts = [];   // 新增盤點用的商品清單（含目前庫存）
+        let openStocktakeId = null;
+        const signedNum = (n) => n > 0 ? `+${n}` : `${n}`;
+        const diffStyle = (n) => n < 0 ? 'color:#e03131;font-weight:bold' : n > 0 ? 'color:#e67700;font-weight:bold' : 'color:#2b8a3e';
+
+        function setStocktakeRange(range) {
+            const { from, to } = rangeDates(range);
+            document.getElementById('stFrom').value = from;
+            document.getElementById('stTo').value = to;
+            loadStocktake();
+        }
+
         async function loadStocktake() {
+            const fromInput = document.getElementById('stFrom');
+            if (!fromInput.value && !document.getElementById('stTo').value && !fromInput.dataset.init) {
+                fromInput.dataset.init = '1';
+                return setStocktakeRange('month');   // 第一次打開預設本月
+            }
+            const q = new URLSearchParams();
+            if (fromInput.value) q.set('from', fromInput.value);
+            if (document.getElementById('stTo').value) q.set('to', document.getElementById('stTo').value);
+            if (document.getElementById('stStore').value) q.set('store', document.getElementById('stStore').value);
             try {
-                const data = await api('/api/stocktake');
-                const tbody = document.querySelector('#stocktakeTable tbody');
-                tbody.innerHTML = groupByCategory(data.data).map(g => groupHeaderRow(g, 5) + g.items.map(s => `
-                        <tr>
-                            <td>${s.name}</td>
-                            ${stockCell(s.gaoxiong)}
-                            ${stockCell(s.taizhong)}
-                            ${stockCell(s.total)}
-                            <td>NT$${s.price}</td>
-                        </tr>
-                    `).join('')).join('');
+                stocktakes = (await api(`/api/admin/stocktakes?${q}`)).data;
             } catch (error) {
                 alert('載入盤點紀錄失敗: ' + error.message);
+                return;
             }
+            const sum = (k) => stocktakes.reduce((s, t) => s + t[k], 0);
+            document.getElementById('stocktakeSummaryBox').innerHTML = `
+                <div class="stat"><div class="stat-value">${stocktakes.length}</div><div class="stat-label">盤點次數</div></div>
+                <div class="stat"><div class="stat-value">${sum('items')}</div><div class="stat-label">盤點品項</div></div>
+                <div class="stat"><div class="stat-value" style="${diffStyle(sum('diff_qty'))}">${signedNum(sum('diff_qty'))}</div><div class="stat-label">差異數量</div></div>
+                <div class="stat"><div class="stat-value" style="${diffStyle(sum('diff_amount'))}">${signed(sum('diff_amount'))}</div><div class="stat-label">差異金額</div></div>`;
+            document.querySelector('#stocktakeTable tbody').innerHTML = stocktakes.length ? stocktakes.map(t => `
+                <tr>
+                    <td>${String(t.count_date).slice(0, 10)}</td>
+                    <td>${escHtml(t.store)}</td>
+                    <td>${escHtml(t.staff || '')}</td>
+                    <td>${t.items}</td>
+                    <td>${t.diff_items}</td>
+                    <td style="${diffStyle(t.diff_qty)}">${signedNum(t.diff_qty)}</td>
+                    <td style="${diffStyle(t.diff_amount)}">${signed(t.diff_amount)}</td>
+                    <td style="font-size:12px">${t.applied ? '✅ 已更新' : '未更新'}</td>
+                    <td style="font-size:13px">${escHtml(t.note || '')}</td>
+                    <td style="white-space: nowrap;">
+                        <button class="row-btn" onclick="toggleStocktake(${t.id})">📋 明細 / ✏️ 編輯</button>
+                        <button class="row-btn danger" onclick="deleteStocktake(${t.id})">🗑️</button>
+                    </td>
+                </tr>
+                <tr class="detail-row" id="stocktakeDetail${t.id}" hidden><td colspan="10"></td></tr>`).join('')
+                : '<tr><td colspan="10" style="color:#999">這段期間沒有盤點紀錄，按「📝 開始盤點」新增</td></tr>';
+            if (openStocktakeId) {
+                const id = openStocktakeId;
+                openStocktakeId = null;
+                if (document.getElementById(`stocktakeDetail${id}`)) toggleStocktake(id);
+            }
+        }
+
+        // ---- 新增盤點 ----
+        async function openStocktakeForm() {
+            try {
+                stocktakeProducts = (await api('/api/stocktake')).data;
+            } catch (error) {
+                alert('載入商品失敗: ' + error.message);
+                return;
+            }
+            const store = document.getElementById('stStore').value;
+            if (store) document.getElementById('stFormStore').value = store;
+            document.getElementById('stFormDate').value = today();
+            document.getElementById('stFormStaff').value = '';
+            document.getElementById('stFormNote').value = '';
+            document.getElementById('stFormApply').checked = true;
+            document.getElementById('stocktakeForm').hidden = false;
+            renderStocktakeForm();
+            document.getElementById('stocktakeForm').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function closeStocktakeForm() {
+            document.getElementById('stocktakeForm').hidden = true;
+        }
+
+        const stocktakeSystemQty = (p) => document.getElementById('stFormStore').value === '高雄' ? p.gaoxiong : p.taizhong;
+
+        function renderStocktakeForm() {
+            // 換門市時保留已經填的數字
+            const typed = {};
+            document.querySelectorAll('#stocktakeFormTable input[data-pid]').forEach(i => { typed[i.dataset.pid] = i.value; });
+            document.querySelector('#stocktakeFormTable tbody').innerHTML = groupByCategory(stocktakeProducts).map(g =>
+                `<tr class="group-row"><td colspan="4">${escHtml(g.category)}（${g.items.length} 項）</td></tr>` + g.items.map(p => `
+                    <tr>
+                        <td>${escHtml(p.name)}</td>
+                        <td>${stocktakeSystemQty(p)}</td>
+                        <td><input type="number" class="cell-input" min="0" inputmode="numeric" data-pid="${p.id}"
+                                   value="${typed[p.id] ?? ''}" oninput="updateStocktakeDiff(this)"></td>
+                        <td class="st-diff"></td>
+                    </tr>`).join('')).join('');
+            document.querySelectorAll('#stocktakeFormTable input[data-pid]').forEach(updateStocktakeDiff);
+        }
+
+        function updateStocktakeDiff(input) {
+            const p = stocktakeProducts.find(x => x.id === Number(input.dataset.pid));
+            const cell = input.closest('tr').querySelector('.st-diff');
+            if (input.value === '') { cell.textContent = ''; return; }
+            const d = Number(input.value) - stocktakeSystemQty(p);
+            cell.textContent = signedNum(d);
+            cell.style.cssText = diffStyle(d);
+        }
+
+        function fillStocktakeSystem() {
+            document.querySelectorAll('#stocktakeFormTable input[data-pid]').forEach(i => {
+                if (i.value === '') {
+                    i.value = stocktakeSystemQty(stocktakeProducts.find(x => x.id === Number(i.dataset.pid)));
+                    updateStocktakeDiff(i);
+                }
+            });
+        }
+
+        function clearStocktakeForm() {
+            if (!confirm('確定要清空已經填的實際數量？')) return;
+            document.querySelectorAll('#stocktakeFormTable input[data-pid]').forEach(i => { i.value = ''; updateStocktakeDiff(i); });
+        }
+
+        async function saveStocktake() {
+            const items = [...document.querySelectorAll('#stocktakeFormTable input[data-pid]')]
+                .filter(i => i.value !== '').map(i => ({ product_id: Number(i.dataset.pid), counted: Number(i.value) }));
+            if (!items.length) { alert('請至少填一個商品的實際數量'); return; }
+            if (items.some(i => !Number.isInteger(i.counted) || i.counted < 0)) { alert('實際數量請填 0 以上的整數'); return; }
+            const store = document.getElementById('stFormStore').value;
+            const apply = document.getElementById('stFormApply').checked;
+            if (!confirm(`儲存 ${store}門市 的盤點（${items.length} 項）？` + (apply ? `\n\n${store}門市這 ${items.length} 項的庫存會改成實際數量。` : '\n\n庫存不會變動，只記錄盤點結果。'))) return;
+            try {
+                const result = await postJson('/api/admin/stocktakes', {
+                    store, date: document.getElementById('stFormDate').value, apply, items,
+                    staff: document.getElementById('stFormStaff').value.trim(), note: document.getElementById('stFormNote').value.trim()
+                });
+                alert(result.message);
+                closeStocktakeForm();
+                loadStocktake();
+            } catch (error) {
+                alert('儲存失敗: ' + error.message);
+            }
+        }
+
+        // ---- 盤點明細 / 編輯 ----
+        async function toggleStocktake(id) {
+            const row = document.getElementById(`stocktakeDetail${id}`);
+            if (!row.hidden) { row.hidden = true; return; }
+            row.hidden = false;
+            const cell = row.firstElementChild;
+            cell.textContent = '載入中…';
+            try {
+                const t = (await api(`/api/admin/stocktakes/${id}`)).data;
+                cell.innerHTML = `
+                    <div class="detail-title">✏️ 盤點明細 — 改完按「保存」（只改紀錄，不動目前庫存）</div>
+                    <div class="input-group">
+                        <input type="date" id="stEditDate${id}" value="${String(t.count_date).slice(0, 10)}" title="盤點日期">
+                        <input type="text" id="stEditStaff${id}" value="${escHtml(t.staff || '')}" placeholder="盤點人" maxlength="30">
+                        <input type="text" id="stEditNote${id}" value="${escHtml(t.note || '')}" placeholder="備註" maxlength="500">
+                        <button onclick="saveStocktakeEdit(${id})">💾 保存</button>
+                    </div>
+                    <table class="detail-table">
+                        <thead><tr><th>分類</th><th>商品</th><th>單價</th><th>系統數量</th><th>實際數量</th><th>差異</th><th>差異金額</th></tr></thead>
+                        <tbody>${t.items.map(i => `
+                            <tr>
+                                <td>${escHtml(i.category || '')}</td>
+                                <td>${escHtml(i.product_name)}</td>
+                                <td>${ntd(i.price)}</td>
+                                <td>${i.system_qty}</td>
+                                <td><input type="number" class="cell-input" min="0" data-item="${i.id}" value="${i.counted_qty}"></td>
+                                <td style="${diffStyle(i.counted_qty - i.system_qty)}">${signedNum(i.counted_qty - i.system_qty)}</td>
+                                <td style="${diffStyle(i.counted_qty - i.system_qty)}">${signed((i.counted_qty - i.system_qty) * i.price)}</td>
+                            </tr>`).join('')}
+                        </tbody>
+                    </table>`;
+            } catch (error) {
+                cell.innerHTML = `<span style="color:#e03131">載入失敗：${escHtml(error.message)}</span>`;
+            }
+        }
+
+        async function saveStocktakeEdit(id) {
+            const items = [...document.querySelectorAll(`#stocktakeDetail${id} input[data-item]`)]
+                .map(i => ({ id: Number(i.dataset.item), counted: i.value === '' ? null : Number(i.value) }));
+            if (items.some(i => i.counted === null || !Number.isInteger(i.counted) || i.counted < 0)) { alert('實際數量請填 0 以上的整數'); return; }
+            try {
+                await postJson('/api/admin/stocktakes/update', {
+                    id, items, date: document.getElementById(`stEditDate${id}`).value,
+                    staff: document.getElementById(`stEditStaff${id}`).value.trim(), note: document.getElementById(`stEditNote${id}`).value.trim()
+                });
+                alert('已保存');
+                openStocktakeId = id;
+                loadStocktake();
+            } catch (error) {
+                alert('保存失敗: ' + error.message);
+            }
+        }
+
+        async function deleteStocktake(id) {
+            const t = stocktakes.find(x => x.id === id);
+            if (!confirm(`確定要刪除這筆盤點？\n\n${String(t.count_date).slice(0, 10)}　${t.store}門市　${t.staff || ''}\n\n刪除後無法復原（目前庫存不會變動）。`)) return;
+            try {
+                await postJson('/api/admin/stocktakes/delete', { id });
+                loadStocktake();
+            } catch (error) {
+                alert('刪除失敗: ' + error.message);
+            }
+        }
+
+        // ---- 匯出 / 列印 ----
+        async function stocktakeDetails() {
+            return Promise.all(stocktakes.map(t => api(`/api/admin/stocktakes/${t.id}`).then(r => r.data)));
+        }
+
+        async function exportStocktakes() {
+            if (!stocktakes.length) { alert('沒有可以匯出的盤點紀錄'); return; }
+            let details;
+            try { details = await stocktakeDetails(); } catch (error) { alert('匯出失敗: ' + error.message); return; }
+            const from = document.getElementById('stFrom').value || '全部', to = document.getElementById('stTo').value || '全部';
+            exportXlsxSheets([
+                { name: '盤點紀錄', rows: [['盤點日期', '門市', '盤點人', '盤點品項', '有差異品項', '差異數量', '差異金額', '庫存已更新', '備註'],
+                    ...stocktakes.map(t => [String(t.count_date).slice(0, 10), t.store, t.staff || '', t.items, t.diff_items, t.diff_qty, t.diff_amount, t.applied ? '是' : '否', t.note || ''])] },
+                { name: '盤點明細', rows: [['盤點日期', '門市', '盤點人', '分類', '商品', '單價', '系統數量', '實際數量', '差異', '差異金額'],
+                    ...details.flatMap(t => t.items.map(i => [String(t.count_date).slice(0, 10), t.store, t.staff || '', i.category || '', i.product_name,
+                        i.price, i.system_qty, i.counted_qty, i.counted_qty - i.system_qty, (i.counted_qty - i.system_qty) * i.price]))] }
+            ], `野烏金盤點紀錄_${from}_${to}.xlsx`);
+        }
+
+        async function printStocktakes() {
+            if (!stocktakes.length) { alert('沒有可以列印的盤點紀錄'); return; }
+            const win = window.open('', '_blank');
+            if (!win) { alert('瀏覽器擋住了列印視窗，請允許這個網站開啟彈出式視窗'); return; }
+            win.document.write('載入中…');
+            let details;
+            try { details = await stocktakeDetails(); } catch (error) { win.close(); alert('列印失敗: ' + error.message); return; }
+            const title = '野烏金 盤點紀錄';
+            win.document.open();
+            win.document.write(`<!DOCTYPE html><html lang="zh-TW"><head><meta charset="UTF-8"><title>${title}</title>
+                <style>
+                    @page { size: A4; margin: 12mm; }
+                    body { font-family: 'Microsoft JhengHei', sans-serif; font-size: 12px; color: #222; }
+                    h1 { font-size: 17px; margin: 0 0 4px; }
+                    h2 { font-size: 14px; margin: 18px 0 4px; page-break-after: avoid; }
+                    table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+                    th, td { border: 1px solid #999; padding: 4px 6px; text-align: left; }
+                    th { background: #eee; }
+                    .neg { color: #c00; font-weight: bold; }
+                    .block { page-break-inside: avoid; }
+                    .no-print { margin-bottom: 10px; }
+                    @media print { .no-print { display: none; } }
+                </style></head><body>
+                <div class="no-print"><button onclick="window.print()">🖨️ 列印</button></div>
+                <h1>${title}</h1>
+                <div>列印時間：${twDateTime(new Date())}</div>
+                ${details.map(t => `<div class="block">
+                    <h2>${String(t.count_date).slice(0, 10)}　${escHtml(t.store)}門市　盤點人：${escHtml(t.staff || '-')}${t.note ? '　備註：' + escHtml(t.note) : ''}</h2>
+                    <table><thead><tr><th>分類</th><th>商品</th><th>系統數量</th><th>實際數量</th><th>差異</th><th>差異金額</th></tr></thead><tbody>
+                    ${t.items.map(i => { const d = i.counted_qty - i.system_qty; return `<tr><td>${escHtml(i.category || '')}</td><td>${escHtml(i.product_name)}</td>
+                        <td>${i.system_qty}</td><td>${i.counted_qty}</td><td class="${d < 0 ? 'neg' : ''}">${signedNum(d)}</td><td class="${d < 0 ? 'neg' : ''}">${signed(d * i.price)}</td></tr>`; }).join('')}
+                    </tbody></table></div>`).join('')}
+                </body></html>`);
+            win.document.close();
         }
 
         async function refreshDashboard() {
