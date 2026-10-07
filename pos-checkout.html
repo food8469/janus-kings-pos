@@ -137,6 +137,15 @@
         .cust-phone { color: #999; font-size: 13px; margin-left: 8px; }
 
         /* 小結 */
+        /* 往下拉更新：關掉瀏覽器自己的下拉重整，統一用我們的 */
+        html, body { overscroll-behavior-y: contain; }
+        .pull-refresh { position: fixed; top: 0; left: 50%; z-index: 3000; transform: translate(-50%, -60px);
+            background: white; color: #667eea; border-radius: 22px; padding: 9px 18px; font-size: 14px; font-weight: bold;
+            box-shadow: 0 4px 14px rgba(0,0,0,0.18); pointer-events: none; white-space: nowrap; }
+        .pull-refresh.animate { transition: transform 0.25s; }
+        .pull-refresh .spin { display: inline-block; }
+        .pull-refresh.loading .spin { animation: pull-spin 0.8s linear infinite; }
+        @keyframes pull-spin { to { transform: rotate(360deg); } }
         /* 盤點 */
         .st-search { margin: 12px 0 6px; padding: 10px; font-size: 15px; }
         .st-tools { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
@@ -336,6 +345,7 @@
     </style>
 </head>
 <body>
+    <div id="pullRefresh" class="pull-refresh"><span class="spin">↻</span> <span id="pullText">往下拉更新</span></div>
     <div class="container">
         <div class="left">
             <div class="header">
@@ -721,6 +731,58 @@
     <script>
         // 前台和 API 在同一個網站
         const API_URL = () => window.location.origin;
+
+        // ---- 往下拉更新（平板 App 沒有瀏覽器的重新整理鍵）----
+        // 購物車空的 → 整頁重新載入（順便拿到新版本）；購物車有東西 → 只更新商品、員工、折扣，購物車保留
+        (function setupPullToRefresh() {
+            const TRIGGER = 80;
+            let startY = null, pull = 0, busy = false;
+            const box = () => document.getElementById('pullRefresh');
+            const show = (y, text) => {
+                box().style.transform = `translate(-50%, ${Math.min(y, 110) - 60}px)`;
+                document.getElementById('pullText').textContent = text;
+            };
+            const anyOverlayOpen = () => [...document.querySelectorAll('.modal-overlay, .menu-overlay, #itemModal, #payModal, #lockScreen')]
+                .some(el => !el.hidden && getComputedStyle(el).display !== 'none');
+            // 手指在可以捲動的區塊（例如購物車清單）裡、而且那塊還沒捲到頂，就交給那塊自己捲
+            const insideScrolled = (el) => {
+                for (; el && el !== document.body; el = el.parentElement) if (el.scrollTop > 0) return true;
+                return false;
+            };
+
+            document.addEventListener('touchstart', (e) => {
+                if (busy || window.scrollY > 0 || e.touches.length !== 1 || anyOverlayOpen() || insideScrolled(e.target)) return;
+                startY = e.touches[0].clientY;
+                pull = 0;
+                box().classList.remove('animate');
+            }, { passive: true });
+
+            document.addEventListener('touchmove', (e) => {
+                if (startY === null) return;
+                pull = (e.touches[0].clientY - startY) * 0.5;
+                if (pull <= 0) { pull = 0; show(0, '往下拉更新'); return; }
+                show(pull, pull >= TRIGGER ? '放開更新' : '往下拉更新');
+            }, { passive: true });
+
+            document.addEventListener('touchend', async () => {
+                if (startY === null) return;
+                startY = null;
+                box().classList.add('animate');
+                if (pull < TRIGGER) { show(0, '往下拉更新'); return; }
+                busy = true;
+                box().classList.add('loading');
+                show(TRIGGER, '更新中…');
+                if (!Object.keys(cart).length) { location.reload(); return; }
+                try {
+                    await Promise.all([loadProducts(), loadStaff(), loadDiscountPresets()]);
+                    show(TRIGGER, '✓ 已更新');
+                } catch (e) {
+                    show(TRIGGER, '更新失敗，請再試一次');
+                }
+                box().classList.remove('loading');
+                setTimeout(() => { show(0, '往下拉更新'); busy = false; }, 900);
+            });
+        })();
 
         // ---- 門市裝置：只有登記過的裝置能使用前台（收銀、打卡、結帳紀錄）----
         const DEVICE_KEY = 'pos_punch_device';
