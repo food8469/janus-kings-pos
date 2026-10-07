@@ -178,6 +178,7 @@
                 <div id="registerDevice" class="input-group">
                     <input type="text" id="deviceName" placeholder="裝置名稱（例：高雄櫃台平板）">
                     <select id="deviceStore">
+                        <option value="" selected disabled>請選擇門市</option>
                         <option value="高雄">高雄門市</option>
                         <option value="台中">台中門市</option>
                     </select>
@@ -1085,6 +1086,7 @@
             const name = document.getElementById('deviceName').value.trim();
             const store = document.getElementById('deviceStore').value;
             if (!name) { alert('請填裝置名稱，例如：高雄櫃台平板'); return; }
+            if (!store) { alert('請選擇這台裝置是哪家門市'); return; }
             if (!confirm(`確定要把「這台裝置」登記為 ${store}門市 的裝置？\n\n請確認你現在是在店裡要用的裝置上操作。`)) return;
             try {
                 const device = (await postJson('/api/admin/devices', { name, store })).data;
@@ -2604,7 +2606,7 @@
                 <tr>
                     <td>${String(t.count_date).slice(0, 10)}</td>
                     <td>${escHtml(t.store)}</td>
-                    <td>${escHtml(t.staff || '')}</td>
+                    <td>${escHtml(t.staff || '')}${t.device_name ? `<br><small style="color:#888">📱 ${escHtml(t.device_name)}</small>` : ''}</td>
                     <td>${t.items}</td>
                     <td>${t.diff_items}</td>
                     <td style="${diffStyle(t.diff_qty)}">${signedNum(t.diff_qty)}</td>

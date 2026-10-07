@@ -137,6 +137,18 @@
         .cust-phone { color: #999; font-size: 13px; margin-left: 8px; }
 
         /* 小結 */
+        /* 盤點 */
+        .st-search { margin: 12px 0 6px; padding: 10px; font-size: 15px; }
+        .st-tools { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+        .st-count { font-size: 13px; color: #888; }
+        .st-cat { font-size: 13px; font-weight: bold; color: #4c5bd4; background: #eef1ff; padding: 6px 10px; border-radius: 6px; margin: 10px 0 4px; }
+        .st-row { display: flex; align-items: center; gap: 8px; background: white; border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; }
+        .st-name { flex: 1; min-width: 0; font-size: 14px; }
+        .st-name small { display: block; font-size: 12px; color: #999; }
+        .st-input { width: 76px; flex: 0 0 auto; padding: 9px; font-size: 16px; text-align: center; }
+        .st-diff { width: 38px; flex: 0 0 auto; text-align: right; font-size: 14px; }
+        .st-apply { display: flex !important; align-items: center; gap: 8px; font-size: 14px !important; color: #333 !important; margin: 10px 0 4px !important; }
+        .st-apply input { width: 18px; height: 18px; }
         .close-box { background: white; border-radius: 8px; padding: 12px 14px; font-size: 14px; }
         .close-period { font-size: 12px; color: #888; margin-bottom: 8px; }
         .close-row { display: flex; justify-content: space-between; padding: 4px 0; }
@@ -571,6 +583,7 @@
                 <input type="text" id="regName" placeholder="例：高雄櫃台平板" maxlength="30">
                 <label>門市</label>
                 <select id="regStore">
+                    <option value="" selected disabled>請選擇門市</option>
                     <option value="高雄">高雄門市</option>
                     <option value="台中">台中門市</option>
                 </select>
@@ -614,6 +627,10 @@
                     <button class="menu-item" onclick="showMenuTab('close')">
                         <span class="menu-icon">📋</span>
                         <span><b>小結</b><small>交班 / 關店：點現金、算差額</small></span>
+                    </button>
+                    <button class="menu-item" onclick="showMenuTab('stocktake')">
+                        <span class="menu-icon">📦</span>
+                        <span><b>盤點</b><small>點庫存、記錄差異</small></span>
                     </button>
                 </div>
 
@@ -667,6 +684,35 @@
                     </div>
                     <div class="list-title">最近的小結紀錄</div>
                     <div id="closeHistory"></div>
+                </div>
+
+                <!-- 盤點 -->
+                <div id="stocktakePanel" hidden>
+                    <div id="stView">
+                        <button class="checkout-btn" style="margin-top: 0;" onclick="startPosStocktake()">📝 開始盤點</button>
+                        <div class="list-title">最近的盤點紀錄</div>
+                        <div id="stHistory"></div>
+                    </div>
+                    <div id="stForm" hidden>
+                        <div class="close-form" style="margin-top: 0;">
+                            <label>盤點人</label>
+                            <select id="stStaff"></select>
+                        </div>
+                        <input type="search" id="stSearch" class="st-search" placeholder="🔍 搜尋商品" oninput="filterPosStocktake()">
+                        <div class="st-tools">
+                            <button class="small-btn ghost" onclick="fillPosStocktake()">沒填的帶入系統數量</button>
+                            <span id="stCount" class="st-count"></span>
+                        </div>
+                        <div id="stList"></div>
+                        <div class="close-form">
+                            <label>備註（選填）</label>
+                            <input type="text" id="stNote" maxlength="300" placeholder="例：月底盤點">
+                            <label class="st-apply"><input type="checkbox" id="stApply" checked> 儲存後把庫存改成「實際數量」</label>
+                            <button class="checkout-btn" id="stSaveBtn" onclick="savePosStocktake()">💾 儲存盤點</button>
+                            <button class="small-btn ghost" onclick="cancelPosStocktake()">取消</button>
+                            <div id="stMessage"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -733,6 +779,7 @@
             const pass = document.getElementById('regPass').value;
             const fail = (text) => { msg.className = 'message error'; msg.textContent = text; };
             if (!name) return fail('請填裝置名稱，例如：高雄櫃台平板');
+            if (!store) return fail('請選擇這台裝置是哪家門市');
             if (!user || !pass) return fail('請輸入後台帳號和密碼');
 
             const btn = document.getElementById('regBtn');
@@ -1933,7 +1980,7 @@
 
         function showMenuTab(tab) {
             menuTab = tab;
-            const titles = { home: '☰ 選單', punch: '🕐 打卡', orders: '🧾 交易紀錄', close: '📋 小結' };
+            const titles = { home: '☰ 選單', punch: '🕐 打卡', orders: '🧾 交易紀錄', close: '📋 小結', stocktake: '📦 盤點' };
             document.getElementById('menuTitle').textContent = titles[tab];
             document.getElementById('menuBack').hidden = tab === 'home';
             document.getElementById('menuHome').hidden = tab !== 'home';
@@ -1941,11 +1988,162 @@
             document.getElementById('punchPanel').hidden = tab !== 'punch';
             document.getElementById('ordersPanel').hidden = tab !== 'orders';
             document.getElementById('closePanel').hidden = tab !== 'close';
+            document.getElementById('stocktakePanel').hidden = tab !== 'stocktake';
             document.getElementById('punchMessage').className = '';
             document.getElementById('punchMessage').textContent = '';
             if (tab === 'punch') checkDevice().then(loadPunches);
             else if (tab === 'orders') loadOrders();
             else if (tab === 'close') loadClose();
+            else if (tab === 'stocktake') loadPosStocktakes();
+        }
+
+        // ============ 盤點（門市平板）============
+        let stProducts = [];
+
+        async function loadPosStocktakes() {
+            document.getElementById('stView').hidden = false;
+            document.getElementById('stForm').hidden = true;
+            const box = document.getElementById('stHistory');
+            box.textContent = '載入中…';
+            try {
+                const list = await getJson('/api/pos/stocktakes');
+                box.innerHTML = list.length ? list.map(t => `
+                    <div class="order-card" onclick="togglePosStocktake(this, ${t.id})" style="cursor:pointer">
+                        <div class="order-head">
+                            <span>📅 ${esc(String(t.count_date).slice(0, 10))}　${esc(t.staff || '')}</span>
+                            <span>${t.items} 項</span>
+                        </div>
+                        <div class="order-line"><span>有差異</span><span>${t.diff_items} 項</span></div>
+                        <div class="order-line" style="${stDiffStyle(t.diff_qty)}"><span>差異數量</span><span>${stSigned(t.diff_qty)}</span></div>
+                        ${t.note ? `<div class="order-line" style="color:#888"><span>📝 ${esc(t.note)}</span></div>` : ''}
+                        <div class="st-detail" hidden></div>
+                    </div>`).join('') : '<div class="empty">還沒有盤點紀錄</div>';
+            } catch (error) {
+                box.innerHTML = `<div class="message error">載入失敗：${esc(error.message)}</div>`;
+            }
+        }
+
+        const stSigned = (n) => n > 0 ? `+${n}` : `${n}`;
+        const stDiffStyle = (n) => n < 0 ? 'color:#e03131;font-weight:bold' : n > 0 ? 'color:#e67700;font-weight:bold' : 'color:#2b8a3e';
+
+        // 點紀錄展開明細（只列有差異的商品）
+        async function togglePosStocktake(card, id) {
+            const box = card.querySelector('.st-detail');
+            if (!box.hidden) { box.hidden = true; return; }
+            box.hidden = false;
+            box.textContent = '載入中…';
+            try {
+                const t = await getJson(`/api/pos/stocktakes/${id}`);
+                const diffs = t.items.filter(i => i.counted_qty !== i.system_qty);
+                box.innerHTML = (diffs.length ? diffs : t.items).map(i => `
+                    <div class="order-line"><span>${esc(i.product_name)}　${i.system_qty} → ${i.counted_qty}</span>
+                        <span style="${stDiffStyle(i.counted_qty - i.system_qty)}">${stSigned(i.counted_qty - i.system_qty)}</span></div>`).join('')
+                    + (diffs.length ? '' : '<div class="hint-text">全部數量都正確 ✅</div>');
+            } catch (error) {
+                box.innerHTML = `<div class="message error">載入失敗：${esc(error.message)}</div>`;
+            }
+        }
+
+        async function startPosStocktake() {
+            const msg = document.getElementById('stMessage');
+            msg.className = ''; msg.textContent = '';
+            try {
+                stProducts = await getJson('/api/pos/stocktake/products');
+            } catch (error) {
+                return alert('載入商品失敗：' + error.message);
+            }
+            // 盤點人：用結帳區的員工名單，預設帶目前選的銷售人員
+            const sel = document.getElementById('stStaff');
+            sel.innerHTML = document.getElementById('staff').innerHTML;
+            sel.value = document.getElementById('staff').value;
+            document.getElementById('stNote').value = '';
+            document.getElementById('stSearch').value = '';
+            document.getElementById('stApply').checked = true;
+            let lastCat = null;
+            document.getElementById('stList').innerHTML = stProducts.map(p => {
+                const head = p.category !== lastCat ? `<div class="st-cat" data-cat="${esc(p.category)}">${esc(p.category)}</div>` : '';
+                lastCat = p.category;
+                return head + `
+                    <div class="st-row" data-name="${esc(`${p.category} ${p.name}`.toLowerCase())}" data-cat="${esc(p.category)}">
+                        <div class="st-name">${esc(p.name)}<small>系統 ${p.qty}</small></div>
+                        <input type="number" class="st-input" min="0" inputmode="numeric" data-pid="${p.id}" data-sys="${p.qty}"
+                               placeholder="實際" oninput="updatePosStDiff(this)">
+                        <span class="st-diff"></span>
+                    </div>`;
+            }).join('');
+            updatePosStCount();
+            document.getElementById('stView').hidden = true;
+            document.getElementById('stForm').hidden = false;
+        }
+
+        function updatePosStDiff(input) {
+            const cell = input.parentElement.querySelector('.st-diff');
+            if (input.value === '') { cell.textContent = ''; } else {
+                const d = Number(input.value) - Number(input.dataset.sys);
+                cell.textContent = stSigned(d);
+                cell.style.cssText = stDiffStyle(d);
+            }
+            updatePosStCount();
+        }
+
+        function updatePosStCount() {
+            const inputs = [...document.querySelectorAll('#stList .st-input')];
+            document.getElementById('stCount').textContent = `已填 ${inputs.filter(i => i.value !== '').length} / ${inputs.length} 項`;
+        }
+
+        function filterPosStocktake() {
+            const q = document.getElementById('stSearch').value.trim().toLowerCase();
+            const shownCats = new Set();
+            document.querySelectorAll('#stList .st-row').forEach(r => {
+                const show = !q || r.dataset.name.includes(q);
+                r.hidden = !show;
+                if (show) shownCats.add(r.dataset.cat);
+            });
+            document.querySelectorAll('#stList .st-cat').forEach(c => { c.hidden = !shownCats.has(c.dataset.cat); });
+        }
+
+        function fillPosStocktake() {
+            document.querySelectorAll('#stList .st-input').forEach(i => {
+                if (i.value === '') { i.value = i.dataset.sys; updatePosStDiff(i); }
+            });
+        }
+
+        function cancelPosStocktake() {
+            const filled = [...document.querySelectorAll('#stList .st-input')].some(i => i.value !== '');
+            if (filled && !confirm('已經填的數量不會儲存，確定要取消？')) return;
+            loadPosStocktakes();
+        }
+
+        async function savePosStocktake() {
+            const msg = document.getElementById('stMessage');
+            const fail = (t) => { msg.className = 'message error'; msg.textContent = t; };
+            const items = [...document.querySelectorAll('#stList .st-input')].filter(i => i.value !== '')
+                .map(i => ({ product_id: Number(i.dataset.pid), counted: Number(i.value) }));
+            const staff = document.getElementById('stStaff').value;
+            if (!staff) return fail('請選擇盤點人');
+            if (!items.length) return fail('請至少填一個商品的實際數量');
+            if (items.some(i => !Number.isInteger(i.counted) || i.counted < 0)) return fail('實際數量請填 0 以上的整數');
+            const apply = document.getElementById('stApply').checked;
+            const store = document.getElementById('store').value;
+            if (!confirm(`儲存盤點（${items.length} 項）？` + (apply ? `\n\n${store}門市這 ${items.length} 項的庫存會改成實際數量。` : '\n\n庫存不會變動，只記錄盤點結果。'))) return;
+            const btn = document.getElementById('stSaveBtn');
+            btn.disabled = true;
+            try {
+                const res = await posFetch('/api/pos/stocktakes', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ items, staff, apply, note: document.getElementById('stNote').value.trim() })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.message || res.status);
+                alert('✓ ' + data.message);
+                if (apply) loadProducts();   // 收銀台的庫存數字也更新
+                loadPosStocktakes();
+            } catch (error) {
+                fail('儲存失敗：' + error.message);
+            } finally {
+                btn.disabled = false;
+            }
         }
 
         // 打卡畫面上方顯示這台裝置

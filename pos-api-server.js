@@ -144,6 +144,8 @@ async function initDb() {
       counted_qty  INTEGER NOT NULL
     );
     CREATE INDEX IF NOT EXISTS stocktake_items_parent_idx ON stocktake_items (stocktake_id);
+    -- 從哪台門市平板盤點的（後台盤點是空白）
+    ALTER TABLE stocktakes ADD COLUMN IF NOT EXISTS device_name TEXT;
     -- 前台圖卡圖片：key = 'cat:分類' 或 'series:分類|系列'
     CREATE TABLE IF NOT EXISTS tile_images (
       key     TEXT PRIMARY KEY,
@@ -1145,12 +1147,12 @@ app.get('/api/stocktake', requireAdmin, async (req, res) => {
   res.json({ status: 'success', data: rows });
 });
 
-// 盤點紀錄列表：?from=&to=（盤點日期）&store=
-app.get('/api/admin/stocktakes', requireAdmin, async (req, res) => {
+// 盤點列表（含差異統計）：from / to（盤點日期）、store、limit
+async function listStocktakes({ from, to, store, limit = 1000 }) {
   const where = [], params = [];
-  if (cleanDate(req.query.from)) { params.push(req.query.from); where.push(`t.count_date >= $${params.length}::date`); }
-  if (cleanDate(req.query.to)) { params.push(req.query.to); where.push(`t.count_date <= $${params.length}::date`); }
-  if (STORES.includes(req.query.store)) { params.push(req.query.store); where.push(`t.store = $${params.length}`); }
+  if (cleanDate(from)) { params.push(from); where.push(`t.count_date >= $${params.length}::date`); }
+  if (cleanDate(to)) { params.push(to); where.push(`t.count_date <= $${params.length}::date`); }
+  if (STORES.includes(store)) { params.push(store); where.push(`t.store = $${params.length}`); }
   const { rows } = await pool.query(
     `SELECT t.*,
             COUNT(i.id)::int AS items,
@@ -1159,38 +1161,34 @@ app.get('/api/admin/stocktakes', requireAdmin, async (req, res) => {
             COALESCE(SUM((i.counted_qty - i.system_qty) * i.price), 0)::int AS diff_amount
      FROM stocktakes t LEFT JOIN stocktake_items i ON i.stocktake_id = t.id
      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-     GROUP BY t.id ORDER BY t.count_date DESC, t.id DESC LIMIT 1000`, params);
-  res.json({ status: 'success', data: rows });
-});
+     GROUP BY t.id ORDER BY t.count_date DESC, t.id DESC LIMIT ${Number(limit) || 1000}`, params);
+  return rows;
+}
 
-// 一次盤點的明細
-app.get('/api/admin/stocktakes/:id', requireAdmin, async (req, res) => {
-  const id = toInt(req.params.id, '盤點');
+async function getStocktake(id) {
   const { rows: [t] } = await pool.query('SELECT * FROM stocktakes WHERE id = $1', [id]);
-  if (!t) return res.status(404).json({ status: 'error', message: '找不到這筆盤點' });
+  if (!t) return null;
   const { rows: items } = await pool.query('SELECT * FROM stocktake_items WHERE stocktake_id = $1 ORDER BY id', [id]);
-  res.json({ status: 'success', data: { ...t, items } });
-});
+  return { ...t, items };
+}
 
-// 新增盤點：items = [{ product_id, counted }]；apply = true 時把庫存改成實際數量
-app.post('/api/admin/stocktakes', requireAdmin, async (req, res) => {
-  const b = req.body || {};
-  const store = STORES.includes(b.store) ? b.store : null;
-  const date = cleanDate(b.date);
-  if (!store) return res.status(400).json({ status: 'error', message: '請選擇門市' });
-  if (!date) return res.status(400).json({ status: 'error', message: '請選擇盤點日期' });
+// 新增盤點：b.items = [{ product_id, counted }]；b.apply = true 時把庫存改成實際數量
+async function createStocktake(b, store, date, deviceName) {
+  if (!STORES.includes(store)) throw new InputError('請選擇門市');
+  if (!date) throw new InputError('請選擇盤點日期');
   const list = (Array.isArray(b.items) ? b.items : [])
     .map(i => ({ id: Number(i.product_id), counted: toInt(i.counted, '實際數量') }))
     .filter(i => Number.isInteger(i.id) && i.counted !== null);
-  if (!list.length) return res.status(400).json({ status: 'error', message: '請至少填一個商品的實際數量' });
+  if (!list.length) throw new InputError('請至少填一個商品的實際數量');
 
   const col = store === '高雄' ? 'gaoxiong' : 'taizhong';
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
     const { rows: [t] } = await client.query(
-      'INSERT INTO stocktakes (store, count_date, staff, note, applied) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-      [store, date, cleanText(b.staff, 30), cleanText(b.note, 500), !!b.apply]);
+      `INSERT INTO stocktakes (store, count_date, staff, note, applied, device_name)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [store, date, cleanText(b.staff, 30), cleanText(b.note, 500), !!b.apply, deviceName || null]);
     for (const i of list) {
       // 鎖住商品列，系統數量以存檔當下為準
       const { rows: [p] } = await client.query(`SELECT * FROM products WHERE id = $1 FOR UPDATE`, [i.id]);
@@ -1202,13 +1200,63 @@ app.post('/api/admin/stocktakes', requireAdmin, async (req, res) => {
       if (b.apply) await client.query(`UPDATE products SET ${col} = $2 WHERE id = $1`, [p.id, i.counted]);
     }
     await client.query('COMMIT');
-    res.json({ status: 'success', message: b.apply ? '盤點已儲存，庫存已更新為實際數量' : '盤點已儲存（庫存沒有變動）', data: t });
+    return { t, message: b.apply ? '盤點已儲存，庫存已更新為實際數量' : '盤點已儲存（庫存沒有變動）' };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     throw err;
   } finally {
     client.release();
   }
+}
+
+// 後台：盤點紀錄列表 ?from=&to=&store=
+app.get('/api/admin/stocktakes', requireAdmin, async (req, res) => {
+  res.json({ status: 'success', data: await listStocktakes(req.query) });
+});
+
+// 後台：一次盤點的明細
+app.get('/api/admin/stocktakes/:id', requireAdmin, async (req, res) => {
+  const t = await getStocktake(toInt(req.params.id, '盤點'));
+  if (!t) return res.status(404).json({ status: 'error', message: '找不到這筆盤點' });
+  res.json({ status: 'success', data: t });
+});
+
+// 後台：新增盤點
+app.post('/api/admin/stocktakes', requireAdmin, async (req, res) => {
+  const b = req.body || {};
+  const { t, message } = await createStocktake(b, b.store, cleanDate(b.date), null);
+  res.json({ status: 'success', message, data: t });
+});
+
+// ---- 前台（門市平板）盤點：門市固定是裝置登記的門市 ----
+const deviceStore = (req) => (req.device ? req.device.store : req.query.store || req.body?.store);
+
+// 前台：這家門市的商品和目前庫存
+app.get('/api/pos/stocktake/products', requireDevice, async (req, res) => {
+  const store = deviceStore(req);
+  if (!STORES.includes(store)) return res.status(400).json({ status: 'error', message: '門市錯誤' });
+  const col = store === '高雄' ? 'gaoxiong' : 'taizhong';
+  const { rows } = await pool.query(
+    `SELECT id, category, series, name, price, ${col} AS qty FROM products ORDER BY sort_order NULLS LAST, id`);
+  res.json({ status: 'success', data: rows.map(p => ({ id: p.id, category: p.category, name: productLabel(p), price: p.price, qty: p.qty })) });
+});
+
+// 前台：這家門市最近的盤點
+app.get('/api/pos/stocktakes', requireDevice, async (req, res) => {
+  res.json({ status: 'success', data: await listStocktakes({ store: deviceStore(req), limit: 30 }) });
+});
+
+app.get('/api/pos/stocktakes/:id', requireDevice, async (req, res) => {
+  const t = await getStocktake(toInt(req.params.id, '盤點'));
+  if (!t || t.store !== deviceStore(req)) return res.status(404).json({ status: 'error', message: '找不到這筆盤點' });
+  res.json({ status: 'success', data: t });
+});
+
+// 前台：新增盤點（日期 = 今天，台灣時間）
+app.post('/api/pos/stocktakes', requireDevice, async (req, res) => {
+  const { rows: [{ today }] } = await pool.query(`SELECT to_char((NOW() AT TIME ZONE 'Asia/Taipei')::date, 'YYYY-MM-DD') AS today`);
+  const { t, message } = await createStocktake(req.body || {}, deviceStore(req), today, req.device?.name);
+  res.json({ status: 'success', message, data: t });
 });
 
 // 修改盤點紀錄（日期、盤點人、備註、實際數量）。只改紀錄，不動目前庫存
