@@ -53,6 +53,8 @@ const STORE_KEYS = { '高雄': 'gaoxiong', '台中': 'taizhong' };
 const productLabel = (p) => (!p.name || p.series === p.name ? p.series : `${p.series}-${p.name}`);
 const PAYMENT_METHODS = ['現金', 'LINE Pay', '信用卡'];
 const STORES = ['高雄', '台中'];
+// 門市顯示名稱（資料裡還是「高雄」「台中」，訊息裡高雄顯示成總部）
+const storeName = (s) => (s === '高雄' ? '高雄總部' : `${s}門市`);
 
 async function initDb() {
   await pool.query(`
@@ -827,7 +829,7 @@ app.post('/api/attendance/punch', async (req, res) => {
   if (!person) return res.status(400).json({ status: 'error', message: '請選擇人員' });
   if (!person.pin_hash) return res.status(400).json({ status: 'error', message: `${name} 還沒有打卡密碼，請店長到後台設定` });
   if (person.store && person.store !== device.store) {
-    return res.status(400).json({ status: 'error', message: `${name} 是${person.store}門市的人員，不能在${device.store}門市打卡` });
+    return res.status(400).json({ status: 'error', message: `${name} 是${storeName(person.store)}的人員，不能在${storeName(device.store)}打卡` });
   }
 
   const fail = pinFailures.get(name);
@@ -849,6 +851,35 @@ app.post('/api/attendance/punch', async (req, res) => {
     'INSERT INTO attendance (staff, store, type, note, device_name) VALUES ($1, $2, $3, $4, $5) RETURNING *',
     [name, device.store, type, String(note || '').trim().slice(0, 200) || null, device.name]);
   res.json({ status: 'success', message: type === 'in' ? '上班打卡成功' : '下班打卡成功', data: row });
+});
+
+// 前台：員工自己改打卡密碼（門市裝置 + 舊密碼；錯太多次一樣會鎖住）
+app.post('/api/staff/pin/change', requireDevice, async (req, res) => {
+  const { staff, old_pin, new_pin } = req.body || {};
+  const name = String(staff || '').trim();
+  const { rows: [person] } = await pool.query('SELECT * FROM staff WHERE name = $1', [name]);
+  if (!person) return res.status(400).json({ status: 'error', message: '請選擇人員' });
+  if (!person.pin_hash) return res.status(400).json({ status: 'error', message: `${name} 還沒有打卡密碼，請店長到後台設定` });
+  if (req.device && person.store && person.store !== req.device.store) {
+    return res.status(400).json({ status: 'error', message: `${name} 是${storeName(person.store)}的人員，請在${storeName(person.store)}的平板改密碼` });
+  }
+  if (!/^\d{4,6}$/.test(String(new_pin || ''))) return res.status(400).json({ status: 'error', message: '新密碼請填 4～6 位數字' });
+
+  const fail = pinFailures.get(name);
+  if (fail && fail.count >= MAX_PIN_FAILURES && Date.now() - fail.at < LOCK_MS) {
+    const min = Math.ceil((LOCK_MS - (Date.now() - fail.at)) / 60000);
+    return res.status(429).json({ status: 'error', message: `密碼錯太多次，請 ${min} 分鐘後再試` });
+  }
+  if (!checkPin(old_pin || '', person.pin_hash)) {
+    const count = fail && Date.now() - fail.at < LOCK_MS ? fail.count + 1 : 1;
+    pinFailures.set(name, { count, at: Date.now() });
+    const left = MAX_PIN_FAILURES - count;
+    return res.status(401).json({ status: 'error',
+      message: left > 0 ? `舊密碼錯誤（再錯 ${left} 次會鎖定 5 分鐘）` : '密碼錯太多次，請 5 分鐘後再試' });
+  }
+  pinFailures.delete(name);
+  await pool.query('UPDATE staff SET pin_hash = $2 WHERE name = $1', [name, hashPin(String(new_pin))]);
+  res.json({ status: 'success', message: '密碼已更改，下次打卡請用新密碼' });
 });
 
 // 後台：員工名單與密碼狀態
@@ -1358,7 +1389,7 @@ async function advanceTransfer(id, step, b, store) {
     const ship = step === 'ship';
     if (t.status !== (ship ? 'requested' : 'shipped')) throw new InputError(`這張調貨單目前是「${TRANSFER_STATUS[t.status]}」，不能${ship ? '出貨' : '進貨'}`);
     const myStore = ship ? t.from_store : t.to_store;
-    if (store && store !== myStore) throw new InputError(`要由${myStore}門市${ship ? '出貨' : '進貨'}`);
+    if (store && store !== myStore) throw new InputError(`要由${storeName(myStore)}${ship ? '出貨' : '進貨'}`);
     const given = new Map((Array.isArray(b.items) ? b.items : []).map(i => [Number(i.id), toInt(i.qty, '數量')]));
     const col = stockCol(myStore);
     for (const i of t.items) {

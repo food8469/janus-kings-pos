@@ -146,6 +146,9 @@
         .pull-refresh .spin { display: inline-block; }
         .pull-refresh.loading .spin { animation: pull-spin 0.8s linear infinite; }
         @keyframes pull-spin { to { transform: rotate(360deg); } }
+        /* 改打卡密碼 */
+        .pin-change-link { display: block; margin: 12px auto 0; background: none; border: none; color: #667eea; font-size: 14px; cursor: pointer; font-family: inherit; text-decoration: underline; }
+        .pin-change-box { background: white; border-radius: 8px; padding: 12px; margin-top: 8px; }
         /* 叫貨 / 出貨 / 進貨 */
         .menu-badge { display: inline-block; min-width: 20px; padding: 1px 6px; margin-left: 6px; border-radius: 10px; background: #e03131; color: white; font-size: 12px; text-align: center; vertical-align: middle; }
         .tf-status { color: white; font-size: 12px; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
@@ -673,6 +676,17 @@
                         <button class="punch-btn out" onclick="punch('out')">🟠 下班打卡</button>
                     </div>
                     <div id="punchMessage"></div>
+                    <!-- 員工自己改打卡密碼 -->
+                    <button class="pin-change-link" onclick="togglePinChange()">🔑 改打卡密碼</button>
+                    <div id="pinChangeBox" class="close-form pin-change-box" hidden>
+                        <div class="hint-text" style="margin-top: 0;">先在上面點選自己的名字，再輸入：</div>
+                        <input type="password" id="pinOld" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="舊密碼">
+                        <input type="password" id="pinNew" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="新密碼（4～6 位數字）">
+                        <input type="password" id="pinNew2" inputmode="numeric" maxlength="6" autocomplete="off" placeholder="再輸入一次新密碼">
+                        <button class="checkout-btn" id="pinChangeBtn" onclick="changeOwnPin()">🔑 確認更改</button>
+                        <div id="pinChangeMessage"></div>
+                        <div class="hint-text">忘記舊密碼請找店長在後台重設。</div>
+                    </div>
                     <div class="list-title">今日打卡紀錄</div>
                     <div id="punchList"></div>
                 </div>
@@ -2504,6 +2518,45 @@
                 btn.onclick = () => selectPunchStaff(n === punchStaffName ? '' : n);
                 grid.appendChild(btn);
             });
+        }
+
+        // ---- 員工自己改打卡密碼 ----
+        function togglePinChange() {
+            const box = document.getElementById('pinChangeBox');
+            box.hidden = !box.hidden;
+            ['pinOld', 'pinNew', 'pinNew2'].forEach(id => document.getElementById(id).value = '');
+            document.getElementById('pinChangeMessage').className = '';
+            document.getElementById('pinChangeMessage').textContent = '';
+        }
+
+        async function changeOwnPin() {
+            const msg = document.getElementById('pinChangeMessage');
+            const fail = (t) => { msg.className = 'message error'; msg.textContent = t; };
+            const oldPin = document.getElementById('pinOld').value;
+            const newPin = document.getElementById('pinNew').value;
+            if (!punchStaffName) return fail('請先在上面點選自己的名字');
+            if (!oldPin) return fail('請輸入舊密碼');
+            if (!/^\d{4,6}$/.test(newPin)) return fail('新密碼請填 4～6 位數字');
+            if (newPin !== document.getElementById('pinNew2').value) return fail('兩次輸入的新密碼不一樣');
+            if (newPin === oldPin) return fail('新密碼跟舊密碼一樣');
+            const btn = document.getElementById('pinChangeBtn');
+            btn.disabled = true;
+            try {
+                const res = await posFetch('/api/staff/pin/change', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ staff: punchStaffName, old_pin: oldPin, new_pin: newPin })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.message || res.status);
+                ['pinOld', 'pinNew', 'pinNew2'].forEach(id => document.getElementById(id).value = '');
+                msg.className = 'message success';
+                msg.textContent = `✓ ${punchStaffName}：${data.message}`;
+            } catch (error) {
+                fail(error.message);
+            } finally {
+                btn.disabled = false;
+            }
         }
 
         async function punch(type) {
