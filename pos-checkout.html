@@ -398,7 +398,7 @@
             </div>
             <!-- 門市由裝置登記決定，不顯示選單 -->
             <select id="store" hidden>
-                <option value="高雄">高雄</option>
+                <option value="高雄">高雄總部</option>
                 <option value="台中">台中</option>
             </select>
 
@@ -600,7 +600,7 @@
                 <label>門市</label>
                 <select id="regStore">
                     <option value="" selected disabled>請選擇門市</option>
-                    <option value="高雄">高雄門市</option>
+                    <option value="高雄">高雄總部</option>
                     <option value="台中">台中門市</option>
                 </select>
                 <label>後台帳號</label>
@@ -632,10 +632,6 @@
                         <span class="menu-icon">🛒</span>
                         <span><b>收銀台</b><small>回到結帳畫面</small></span>
                     </button>
-                    <button class="menu-item" onclick="showMenuTab('punch')">
-                        <span class="menu-icon">🕐</span>
-                        <span><b>打卡</b><small>上班 / 下班打卡、備註</small></span>
-                    </button>
                     <button class="menu-item" onclick="showMenuTab('orders')">
                         <span class="menu-icon">🧾</span>
                         <span><b>交易紀錄</b><small>今日每一筆結帳</small></span>
@@ -652,12 +648,16 @@
                         <span class="menu-icon">📦</span>
                         <span><b>盤點</b><small>點庫存、記錄差異</small></span>
                     </button>
+                    <button class="menu-item" onclick="showMenuTab('punch')">
+                        <span class="menu-icon">🕐</span>
+                        <span><b>打卡</b><small>上班 / 下班打卡、備註</small></span>
+                    </button>
                 </div>
 
                 <div class="menu-store" id="menuStoreRow" hidden>
                     <label>門市</label>
                     <select id="menuStore" onchange="changeMenuStore(this.value)">
-                        <option value="高雄">高雄</option>
+                        <option value="高雄">高雄總部</option>
                         <option value="台中">台中</option>
                     </select>
                 </div>
@@ -769,6 +769,9 @@
         // 前台和 API 在同一個網站
         const API_URL = () => window.location.origin;
 
+        // 門市顯示名稱（資料裡還是「高雄」「台中」，只有畫面上高雄顯示成總部）
+        const storeName = (s) => (s === '高雄' ? '高雄總部' : `${s}門市`);
+
         // ---- 往下拉更新（平板 App 沒有瀏覽器的重新整理鍵）----
         // 購物車空的 → 整頁重新載入（順便拿到新版本）；購物車有東西 → 只更新商品、員工、折扣，購物車保留
         (function setupPullToRefresh() {
@@ -863,7 +866,7 @@
                 select.value = punchDevice.store;
                 select.disabled = true;
             });
-            document.getElementById('cartStoreLabel').textContent = `📍 ${punchDevice.store}門市`;
+            document.getElementById('cartStoreLabel').textContent = `📍 ${storeName(punchDevice.store)}`;
             loadProducts();
             loadStaff();
             loadDiscountPresets();
@@ -897,7 +900,7 @@
                 }
                 document.getElementById('regPass').value = '';
                 msg.className = 'message success';
-                msg.textContent = `✓ ${data.message}（${store}門市）`;
+                msg.textContent = `✓ ${data.message}（${storeName(store)}）`;
                 await initDevice();
             } catch (error) {
                 fail('登記失敗：' + error.message);
@@ -1869,7 +1872,7 @@
                     @media print { .no-print { display: none; } @page { margin: 4mm; } }
                 </style></head><body>
                 <div class="no-print"><button onclick="window.print()">🖨️ 列印</button></div>
-                <h1>野烏金 ${esc(c.store)}門市　小結單</h1>
+                <h1>野烏金 ${storeName(esc(c.store))}　小結單</h1>
                 <div class="c">${mdhm(c.start_at)} ～ ${mdhm(c.end_at)}</div>
                 <div class="c">小結人員：${esc(c.staff)}</div>
                 <hr>
@@ -2436,7 +2439,7 @@
             if (items.some(i => !Number.isInteger(i.counted) || i.counted < 0)) return fail('實際數量請填 0 以上的整數');
             const apply = document.getElementById('stApply').checked;
             const store = document.getElementById('store').value;
-            if (!confirm(`儲存盤點（${items.length} 項）？` + (apply ? `\n\n${store}門市這 ${items.length} 項的庫存會改成實際數量。` : '\n\n庫存不會變動，只記錄盤點結果。'))) return;
+            if (!confirm(`儲存盤點（${items.length} 項）？` + (apply ? `\n\n${storeName(store)}這 ${items.length} 項的庫存會改成實際數量。` : '\n\n庫存不會變動，只記錄盤點結果。'))) return;
             const btn = document.getElementById('stSaveBtn');
             btn.disabled = true;
             try {
@@ -2462,7 +2465,7 @@
             const box = document.getElementById('deviceStatus');
             box.className = 'device-status ' + (punchDevice ? 'ok' : 'bad');
             box.innerHTML = punchDevice
-                ? `📍 ${esc(punchDevice.store)}門市裝置（${esc(punchDevice.name)}）`
+                ? `📍 ${storeName(esc(punchDevice.store))}裝置（${esc(punchDevice.name)}）`
                 : '⚠️ 這台裝置未授權，不能打卡。';
             document.querySelectorAll('.punch-btn').forEach(b => b.disabled = !punchDevice);
         }
