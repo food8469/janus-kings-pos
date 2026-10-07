@@ -146,6 +146,12 @@
         .pull-refresh .spin { display: inline-block; }
         .pull-refresh.loading .spin { animation: pull-spin 0.8s linear infinite; }
         @keyframes pull-spin { to { transform: rotate(360deg); } }
+        /* 叫貨 / 出貨 / 進貨 */
+        .menu-badge { display: inline-block; min-width: 20px; padding: 1px 6px; margin-left: 6px; border-radius: 10px; background: #e03131; color: white; font-size: 12px; text-align: center; vertical-align: middle; }
+        .tf-status { color: white; font-size: 12px; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+        .tf-actions { display: flex; justify-content: flex-end; margin-top: 8px; }
+        .tf-actions .small-btn { padding: 10px 18px; font-size: 15px; }
+        .tf-detail-head { display: flex; justify-content: space-between; font-size: 12px; color: #999; margin-top: 8px; }
         /* 盤點 */
         .st-search { margin: 12px 0 6px; padding: 10px; font-size: 15px; }
         .st-tools { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
@@ -638,6 +644,10 @@
                         <span class="menu-icon">📋</span>
                         <span><b>小結</b><small>交班 / 關店：點現金、算差額</small></span>
                     </button>
+                    <button class="menu-item" onclick="showMenuTab('transfer')">
+                        <span class="menu-icon">🚚</span>
+                        <span><b>叫貨 / 出貨 / 進貨 <span id="transferBadge" class="menu-badge" hidden></span></b><small>門市之間調貨</small></span>
+                    </button>
                     <button class="menu-item" onclick="showMenuTab('stocktake')">
                         <span class="menu-icon">📦</span>
                         <span><b>盤點</b><small>點庫存、記錄差異</small></span>
@@ -694,6 +704,33 @@
                     </div>
                     <div class="list-title">最近的小結紀錄</div>
                     <div id="closeHistory"></div>
+                </div>
+
+                <!-- 叫貨 → 出貨 → 進貨 -->
+                <div id="transferPanel" hidden>
+                    <div id="tfView">
+                        <button class="checkout-btn" style="margin-top: 0;" id="tfNewBtn" onclick="startTransferRequest()">📝 叫貨</button>
+                        <div class="list-title">調貨單（待處理的在最上面）</div>
+                        <div id="tfList"></div>
+                    </div>
+                    <!-- 叫貨表單 / 出貨、進貨確認 共用 -->
+                    <div id="tfForm" hidden>
+                        <div id="tfFormHead" class="close-box"></div>
+                        <div class="close-form">
+                            <label id="tfStaffLabel">經手人</label>
+                            <select id="tfStaff"></select>
+                        </div>
+                        <input type="search" id="tfSearch" class="st-search" placeholder="🔍 搜尋商品" oninput="filterTransferRows()">
+                        <div class="st-tools"><span id="tfHint" class="st-count"></span><span id="tfCount" class="st-count"></span></div>
+                        <div id="tfRows"></div>
+                        <div class="close-form">
+                            <label>備註（選填）</label>
+                            <input type="text" id="tfNote" maxlength="300" placeholder="例：週末用、少 2 盒下次補">
+                            <button class="checkout-btn" id="tfSaveBtn" onclick="saveTransferStep()">送出</button>
+                            <button class="small-btn ghost" onclick="loadTransfers()">取消</button>
+                            <div id="tfMessage"></div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- 盤點 -->
@@ -2042,7 +2079,7 @@
 
         function showMenuTab(tab) {
             menuTab = tab;
-            const titles = { home: '☰ 選單', punch: '🕐 打卡', orders: '🧾 交易紀錄', close: '📋 小結', stocktake: '📦 盤點' };
+            const titles = { home: '☰ 選單', punch: '🕐 打卡', orders: '🧾 交易紀錄', close: '📋 小結', stocktake: '📦 盤點', transfer: '🚚 叫貨 / 出貨 / 進貨' };
             document.getElementById('menuTitle').textContent = titles[tab];
             document.getElementById('menuBack').hidden = tab === 'home';
             document.getElementById('menuHome').hidden = tab !== 'home';
@@ -2051,12 +2088,224 @@
             document.getElementById('ordersPanel').hidden = tab !== 'orders';
             document.getElementById('closePanel').hidden = tab !== 'close';
             document.getElementById('stocktakePanel').hidden = tab !== 'stocktake';
+            document.getElementById('transferPanel').hidden = tab !== 'transfer';
+            if (tab === 'home') loadTransferBadge();
             document.getElementById('punchMessage').className = '';
             document.getElementById('punchMessage').textContent = '';
             if (tab === 'punch') checkDevice().then(loadPunches);
             else if (tab === 'orders') loadOrders();
             else if (tab === 'close') loadClose();
             else if (tab === 'stocktake') loadPosStocktakes();
+            else if (tab === 'transfer') loadTransfers();
+        }
+
+        // ============ 叫貨 → 出貨 → 進貨（兩家門市調貨）============
+        const TF_STATUS = { requested: ['已叫貨', '#e67700'], shipped: ['已出貨・運送中', '#1c7ed6'], received: ['已進貨', '#2b8a3e'], cancelled: ['已取消', '#adb5bd'] };
+        const myStore = () => document.getElementById('store').value;
+        const otherStore = () => (myStore() === '高雄' ? '台中' : '高雄');
+        let tfMode = null;       // 'request' | 'ship' | 'receive'
+        let tfOrder = null;      // 出貨 / 進貨中的調貨單
+
+        // 選單上的紅點：這家門市待出貨 + 待進貨的張數
+        async function loadTransferBadge() {
+            try {
+                const list = await getJson('/api/pos/transfers');
+                const n = list.filter(t => (t.status === 'requested' && t.from_store === myStore()) || (t.status === 'shipped' && t.to_store === myStore())).length;
+                const badge = document.getElementById('transferBadge');
+                badge.hidden = !n;
+                badge.textContent = n;
+            } catch (e) { /* 沒網路就不顯示 */ }
+        }
+
+        async function loadTransfers() {
+            document.getElementById('tfView').hidden = false;
+            document.getElementById('tfForm').hidden = true;
+            document.getElementById('tfNewBtn').textContent = `📝 向${otherStore()}叫貨`;
+            const box = document.getElementById('tfList');
+            box.textContent = '載入中…';
+            try {
+                const list = await getJson('/api/pos/transfers');
+                box.innerHTML = list.length ? list.map(t => {
+                    const [label, color] = TF_STATUS[t.status] || [t.status, '#888'];
+                    const iRequested = t.to_store === myStore();
+                    const action =
+                        t.status === 'requested' && !iRequested ? `<button class="small-btn" onclick="event.stopPropagation(); startTransferStep(${t.id}, 'ship')">🚚 出貨</button>`
+                        : t.status === 'shipped' && iRequested ? `<button class="small-btn" onclick="event.stopPropagation(); startTransferStep(${t.id}, 'receive')">📥 進貨</button>`
+                        : t.status === 'requested' && iRequested ? `<button class="small-btn ghost" onclick="event.stopPropagation(); cancelTransfer(${t.id})">取消叫貨</button>`
+                        : '';
+                    return `
+                    <div class="order-card" onclick="toggleTransfer(this, ${t.id})" style="cursor:pointer">
+                        <div class="order-head">
+                            <span>#${t.id}　${esc(t.to_store)} 向 ${esc(t.from_store)} 叫貨</span>
+                            <span class="tf-status" style="background:${color}">${label}</span>
+                        </div>
+                        <div class="order-line"><span>📅 ${mdhm(t.requested_at)}　${esc(t.requested_by || '')}</span><span>${t.items} 項・${t.req_total} 個</span></div>
+                        ${t.shipped_at ? `<div class="order-line"><span>🚚 出貨 ${mdhm(t.shipped_at)}　${esc(t.shipped_by || '')}</span><span>${t.ship_total} 個</span></div>` : ''}
+                        ${t.received_at ? `<div class="order-line"><span>📥 進貨 ${mdhm(t.received_at)}　${esc(t.received_by || '')}</span><span>${t.recv_total} 個</span></div>` : ''}
+                        ${action ? `<div class="tf-actions">${action}</div>` : ''}
+                        <div class="st-detail" hidden></div>
+                    </div>`;
+                }).join('') : '<div class="empty">還沒有調貨單</div>';
+            } catch (error) {
+                box.innerHTML = `<div class="message error">載入失敗：${esc(error.message)}</div>`;
+            }
+            loadTransferBadge();
+        }
+
+        // 點調貨單展開明細：叫 / 出 / 進 各幾個
+        async function toggleTransfer(card, id) {
+            const box = card.querySelector('.st-detail');
+            if (!box.hidden) { box.hidden = true; return; }
+            box.hidden = false;
+            box.textContent = '載入中…';
+            try {
+                const t = await getJson(`/api/pos/transfers/${id}`);
+                box.innerHTML = `<div class="tf-detail-head"><span>商品</span><span>叫 / 出 / 進</span></div>` + t.items.map(i => {
+                    const short = i.recv_qty !== null && i.recv_qty !== i.req_qty;
+                    return `<div class="order-line"><span>${esc(i.product_name)}</span>
+                        <span style="${short ? 'color:#e03131;font-weight:bold' : ''}">${i.req_qty} / ${i.ship_qty ?? '-'} / ${i.recv_qty ?? '-'}</span></div>`;
+                }).join('')
+                    + [t.request_note && `📝 叫貨：${esc(t.request_note)}`, t.ship_note && `📝 出貨：${esc(t.ship_note)}`, t.receive_note && `📝 進貨：${esc(t.receive_note)}`]
+                        .filter(Boolean).map(n => `<div class="hint-text">${n}</div>`).join('');
+            } catch (error) {
+                box.innerHTML = `<div class="message error">載入失敗：${esc(error.message)}</div>`;
+            }
+        }
+
+        function fillTransferStaff() {
+            const sel = document.getElementById('tfStaff');
+            sel.innerHTML = document.getElementById('staff').innerHTML;
+            sel.value = document.getElementById('staff').value;
+            document.getElementById('tfNote').value = '';
+            document.getElementById('tfSearch').value = '';
+            document.getElementById('tfMessage').className = '';
+            document.getElementById('tfMessage').textContent = '';
+        }
+
+        // 叫貨：列出全部商品，填要叫幾個
+        async function startTransferRequest() {
+            let products;
+            try { products = await getJson('/api/pos/stocktake/products'); } catch (error) { return alert('載入商品失敗：' + error.message); }
+            tfMode = 'request';
+            tfOrder = null;
+            fillTransferStaff();
+            document.getElementById('tfFormHead').innerHTML = `📝 <b>${esc(myStore())}</b> 向 <b>${esc(otherStore())}</b> 叫貨<div class="hint-text">填要叫幾個，不需要的留空。送出後等${esc(otherStore())}出貨。</div>`;
+            document.getElementById('tfStaffLabel').textContent = '叫貨人';
+            document.getElementById('tfHint').textContent = '';
+            document.getElementById('tfSaveBtn').textContent = `📝 送出叫貨`;
+            renderTransferRows(products.map(p => ({ key: p.id, category: p.category, name: p.name, sub: `本店庫存 ${p.qty}`, value: '' })));
+            showTransferForm();
+        }
+
+        // 出貨 / 進貨：列出這張單的商品，預設帶叫貨（出貨）數量，可以改
+        async function startTransferStep(id, step) {
+            let t;
+            try { t = await getJson(`/api/pos/transfers/${id}`); } catch (error) { return alert('載入失敗：' + error.message); }
+            tfMode = step;
+            tfOrder = t;
+            fillTransferStaff();
+            const ship = step === 'ship';
+            document.getElementById('tfFormHead').innerHTML = ship
+                ? `🚚 <b>${esc(t.from_store)}</b> 出貨給 <b>${esc(t.to_store)}</b>（#${t.id}）<div class="hint-text">數量已帶入叫貨數量，實際出多少就改成多少。送出後${esc(t.from_store)}庫存會扣除。</div>`
+                : `📥 <b>${esc(t.to_store)}</b> 進貨（#${t.id}，${esc(t.from_store)} 出貨）<div class="hint-text">數量已帶入出貨數量，實際收到多少就改成多少。送出後${esc(t.to_store)}庫存會增加。</div>`;
+            document.getElementById('tfStaffLabel').textContent = ship ? '出貨人' : '進貨人';
+            document.getElementById('tfHint').textContent = ship ? '括號是叫貨數量' : '括號是出貨數量';
+            document.getElementById('tfSaveBtn').textContent = ship ? '🚚 確認出貨' : '📥 確認進貨';
+            renderTransferRows(t.items.map(i => {
+                const base = ship ? i.req_qty : i.ship_qty;
+                return { key: i.id, category: i.category, name: i.product_name, sub: `${ship ? '叫貨' : '出貨'} ${base}`, value: base };
+            }));
+            showTransferForm();
+        }
+
+        function showTransferForm() {
+            document.getElementById('tfView').hidden = true;
+            document.getElementById('tfForm').hidden = false;
+            updateTransferCount();
+        }
+
+        function renderTransferRows(rows) {
+            let lastCat = null;
+            document.getElementById('tfRows').innerHTML = rows.map(r => {
+                const head = r.category !== lastCat ? `<div class="st-cat" data-cat="${esc(r.category || '')}">${esc(r.category || '未分類')}</div>` : '';
+                lastCat = r.category;
+                return head + `
+                    <div class="st-row" data-name="${esc(`${r.category} ${r.name}`.toLowerCase())}" data-cat="${esc(r.category || '')}">
+                        <div class="st-name">${esc(r.name)}<small>${esc(r.sub)}</small></div>
+                        <input type="number" class="st-input" min="0" inputmode="numeric" data-key="${r.key}" value="${r.value}"
+                               placeholder="數量" oninput="updateTransferCount()">
+                    </div>`;
+            }).join('');
+        }
+
+        function updateTransferCount() {
+            const inputs = [...document.querySelectorAll('#tfRows .st-input')];
+            const filled = inputs.filter(i => Number(i.value) > 0);
+            document.getElementById('tfCount').textContent = `${filled.length} 項・共 ${filled.reduce((s, i) => s + Number(i.value), 0)} 個`;
+        }
+
+        function filterTransferRows() {
+            const q = document.getElementById('tfSearch').value.trim().toLowerCase();
+            const cats = new Set();
+            document.querySelectorAll('#tfRows .st-row').forEach(r => {
+                const show = !q || r.dataset.name.includes(q);
+                r.hidden = !show;
+                if (show) cats.add(r.dataset.cat);
+            });
+            document.querySelectorAll('#tfRows .st-cat').forEach(c => { c.hidden = !cats.has(c.dataset.cat); });
+        }
+
+        async function saveTransferStep() {
+            const msg = document.getElementById('tfMessage');
+            const fail = (t) => { msg.className = 'message error'; msg.textContent = t; };
+            const staff = document.getElementById('tfStaff').value;
+            if (!staff) return fail('請選擇' + document.getElementById('tfStaffLabel').textContent);
+            const inputs = [...document.querySelectorAll('#tfRows .st-input')];
+            if (inputs.some(i => i.value !== '' && (!Number.isInteger(Number(i.value)) || Number(i.value) < 0))) return fail('數量請填 0 以上的整數');
+            const note = document.getElementById('tfNote').value.trim();
+            let path, body, confirmText;
+            if (tfMode === 'request') {
+                const items = inputs.filter(i => Number(i.value) > 0).map(i => ({ product_id: Number(i.dataset.key), qty: Number(i.value) }));
+                if (!items.length) return fail('請至少填一個商品要叫幾個');
+                path = '/api/pos/transfers';
+                body = { items, staff, note };
+                confirmText = `向${otherStore()}叫貨 ${items.length} 項、共 ${items.reduce((s, i) => s + i.qty, 0)} 個？`;
+            } else {
+                const items = inputs.map(i => ({ id: Number(i.dataset.key), qty: i.value === '' ? 0 : Number(i.value) }));
+                const total = items.reduce((s, i) => s + i.qty, 0);
+                path = `/api/pos/transfers/${tfOrder.id}/${tfMode}`;
+                body = { items, staff, note };
+                confirmText = tfMode === 'ship'
+                    ? `確認出貨 ${total} 個給${tfOrder.to_store}？\n\n${tfOrder.from_store}庫存會扣除。`
+                    : `確認進貨 ${total} 個？\n\n${tfOrder.to_store}庫存會增加。`;
+            }
+            if (!confirm(confirmText)) return;
+            const btn = document.getElementById('tfSaveBtn');
+            btn.disabled = true;
+            try {
+                const res = await posFetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.message || res.status);
+                alert('✓ ' + data.message);
+                if (tfMode !== 'request') loadProducts();   // 庫存變了，收銀台數字也更新
+                loadTransfers();
+            } catch (error) {
+                fail('送出失敗：' + error.message);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        async function cancelTransfer(id) {
+            if (!confirm('確定要取消這張叫貨單？')) return;
+            try {
+                const res = await posFetch(`/api/pos/transfers/${id}/cancel`, { method: 'POST' });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.message || res.status);
+                loadTransfers();
+            } catch (error) {
+                alert('取消失敗：' + error.message);
+            }
         }
 
         // ============ 盤點（門市平板）============

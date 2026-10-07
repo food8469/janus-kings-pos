@@ -116,6 +116,7 @@
             <button class="tab-btn" onclick="showTab('customers')">👥 顧客</button>
             <button class="tab-btn" onclick="showTab('discounts')">🏷️ 折扣優惠</button>
             <button class="tab-btn" onclick="showTab('stocktake')">📋 盤點紀錄</button>
+            <button class="tab-btn" onclick="showTab('transfers')">🚚 叫貨 / 進貨</button>
             <button class="tab-btn" onclick="showTab('closes')">📋 小結紀錄</button>
             <button class="tab-btn" onclick="showTab('attendance')">🕐 打卡紀錄</button>
             <button class="tab-btn" onclick="showTab('punchSettings')">🔐 裝置與打卡設定</button>
@@ -419,6 +420,37 @@
             <p class="hint">依選擇的日期區間統計。按「✏️ 編輯」展開這位員工在這段期間的每一筆銷售，可以改銷售人員、數量、客人或刪除；刪除或減少數量會把商品加回庫存。</p>
         </div>
 
+        <!-- 叫貨 → 出貨 → 進貨 -->
+        <div id="transfers" class="content">
+            <h2>叫貨 / 出貨 / 進貨</h2>
+            <div class="filter-bar" style="align-items: center;">
+                <label>📅 <input type="date" id="tfFrom" onchange="loadTransfers()"></label>
+                <span>～</span>
+                <label><input type="date" id="tfTo" onchange="loadTransfers()"></label>
+                <button class="quick-range" onclick="setTransferRange('today')">今天</button>
+                <button class="quick-range" onclick="setTransferRange('week')">本週</button>
+                <button class="quick-range" onclick="setTransferRange('month')">本月</button>
+                <button class="quick-range" onclick="setTransferRange('lastMonth')">上個月</button>
+                <button class="quick-range" onclick="setTransferRange('all')">全部</button>
+            </div>
+            <div class="filter-bar" style="align-items: center; margin-top: 10px;">
+                <select id="tfStatus" onchange="loadTransfers()">
+                    <option value="">全部狀態</option><option value="requested">已叫貨（待出貨）</option>
+                    <option value="shipped">已出貨（待進貨）</option><option value="received">已進貨</option><option value="cancelled">已取消</option>
+                </select>
+                <select id="tfTarget" onchange="loadTransfers()"><option value="">全部門市</option><option>高雄</option><option>台中</option></select>
+                <button onclick="loadTransfers()">🔄 重新整理</button>
+                <button class="secondary" onclick="exportTransfers()">⬇️ 匯出 Excel</button>
+                <button class="secondary" onclick="printTransfers()">🖨️ 列印</button>
+            </div>
+            <div id="tfSummaryBox" class="stat-box"></div>
+            <table id="tfTable">
+                <thead><tr><th>單號</th><th>叫貨時間</th><th>叫貨門市</th><th>出貨門市</th><th>狀態</th><th>叫 / 出 / 進</th><th>叫貨人</th><th>出貨</th><th>進貨</th><th></th></tr></thead>
+                <tbody></tbody>
+            </table>
+            <p class="hint">門市在平板 ☰ →「🚚 叫貨 / 出貨 / 進貨」操作：叫貨門市叫貨 → 出貨門市按「出貨」（扣出貨門市庫存）→ 叫貨門市收到後按「進貨」（加叫貨門市庫存）。出貨或進貨數量跟叫貨不一樣會用紅字標出。已出貨但還沒進貨的單，在這裡取消會把出貨門市扣掉的庫存加回去。</p>
+        </div>
+
         <!-- 盤點紀錄 -->
         <div id="stocktake" class="content">
             <h2>盤點紀錄</h2>
@@ -517,6 +549,195 @@
             else if (tabName === 'customers') loadCustomers();
             else if (tabName === 'closes') loadCloses();
             else if (tabName === 'discounts') loadDiscounts();
+            else if (tabName === 'transfers') loadTransfers();
+        }
+
+        // ============ 叫貨 → 出貨 → 進貨 ============
+        const TF_STATUS = { requested: ['已叫貨', '#e67700'], shipped: ['已出貨', '#1c7ed6'], received: ['已進貨', '#2b8a3e'], cancelled: ['已取消', '#adb5bd'] };
+        let transfers = [];
+        let openTransferId = null;
+
+        function setTransferRange(range) {
+            const { from, to } = rangeDates(range);
+            document.getElementById('tfFrom').value = from;
+            document.getElementById('tfTo').value = to;
+            loadTransfers();
+        }
+
+        async function loadTransfers() {
+            const fromInput = document.getElementById('tfFrom');
+            if (!fromInput.value && !document.getElementById('tfTo').value && !fromInput.dataset.init) {
+                fromInput.dataset.init = '1';
+                return setTransferRange('month');
+            }
+            const q = new URLSearchParams();
+            if (fromInput.value) q.set('from', fromInput.value);
+            if (document.getElementById('tfTo').value) q.set('to', document.getElementById('tfTo').value);
+            if (document.getElementById('tfStatus').value) q.set('status', document.getElementById('tfStatus').value);
+            if (document.getElementById('tfTarget').value) q.set('store', document.getElementById('tfTarget').value);
+            try {
+                transfers = (await api(`/api/admin/transfers?${q}`)).data;
+            } catch (error) {
+                alert('載入調貨單失敗: ' + error.message);
+                return;
+            }
+            const count = (s) => transfers.filter(t => t.status === s).length;
+            document.getElementById('tfSummaryBox').innerHTML = `
+                <div class="stat"><div class="stat-value">${transfers.length}</div><div class="stat-label">調貨單</div></div>
+                <div class="stat"><div class="stat-value" style="color:#e67700">${count('requested')}</div><div class="stat-label">待出貨</div></div>
+                <div class="stat"><div class="stat-value" style="color:#1c7ed6">${count('shipped')}</div><div class="stat-label">待進貨</div></div>
+                <div class="stat"><div class="stat-value" style="color:#2b8a3e">${count('received')}</div><div class="stat-label">已進貨</div></div>`;
+            const who = (by, at) => at ? `${escHtml(by || '')}<br><small style="color:#888">${shortTime(at)}</small>` : '-';
+            document.querySelector('#tfTable tbody').innerHTML = transfers.length ? transfers.map(t => {
+                const [label, color] = TF_STATUS[t.status] || [t.status, '#888'];
+                const mismatch = (t.ship_total && t.ship_total !== t.req_total) || (t.status === 'received' && t.recv_total !== t.ship_total);
+                return `
+                <tr>
+                    <td>#${t.id}</td>
+                    <td>${shortTime(t.requested_at)}</td>
+                    <td>${escHtml(t.to_store)}</td>
+                    <td>${escHtml(t.from_store)}</td>
+                    <td><span style="background:${color};color:white;padding:3px 10px;border-radius:12px;font-size:13px;white-space:nowrap">${label}</span></td>
+                    <td style="${mismatch ? 'color:#e03131;font-weight:bold' : ''}">${t.req_total} / ${t.shipped_at ? t.ship_total : '-'} / ${t.received_at ? t.recv_total : '-'}</td>
+                    <td>${escHtml(t.requested_by || '')}</td>
+                    <td>${who(t.shipped_by, t.shipped_at)}</td>
+                    <td>${who(t.received_by, t.received_at)}</td>
+                    <td style="white-space: nowrap;"><button class="row-btn" onclick="toggleTransfer(${t.id})">📋 明細</button></td>
+                </tr>
+                <tr class="detail-row" id="tfDetail${t.id}" hidden><td colspan="10"></td></tr>`;
+            }).join('') : '<tr><td colspan="10" style="color:#999">這段期間沒有調貨單</td></tr>';
+            if (openTransferId) {
+                const id = openTransferId;
+                openTransferId = null;
+                if (document.getElementById(`tfDetail${id}`)) toggleTransfer(id);
+            }
+        }
+
+        async function toggleTransfer(id) {
+            const row = document.getElementById(`tfDetail${id}`);
+            if (!row.hidden) { row.hidden = true; return; }
+            row.hidden = false;
+            const cell = row.firstElementChild;
+            cell.textContent = '載入中…';
+            try {
+                const t = (await api(`/api/admin/transfers/${id}`)).data;
+                // 後台也可以代為出貨 / 進貨（數量可改）
+                const step = t.status === 'requested' ? 'ship' : t.status === 'shipped' ? 'receive' : null;
+                const qtyCell = (i, field, editable, base) => editable
+                    ? `<input type="number" class="cell-input" min="0" data-item="${i.id}" value="${base ?? 0}">`
+                    : (i[field] ?? '-');
+                cell.innerHTML = `
+                    <div class="detail-title">#${t.id}　${escHtml(t.to_store)} 向 ${escHtml(t.from_store)} 叫貨</div>
+                    <table class="detail-table">
+                        <thead><tr><th>分類</th><th>商品</th><th>叫貨</th><th>出貨</th><th>進貨</th></tr></thead>
+                        <tbody>${t.items.map(i => `
+                            <tr>
+                                <td>${escHtml(i.category || '')}</td>
+                                <td>${escHtml(i.product_name)}</td>
+                                <td>${i.req_qty}</td>
+                                <td>${qtyCell(i, 'ship_qty', step === 'ship', i.req_qty)}</td>
+                                <td style="${i.recv_qty !== null && i.recv_qty !== i.req_qty ? 'color:#e03131;font-weight:bold' : ''}">${qtyCell(i, 'recv_qty', step === 'receive', i.ship_qty)}</td>
+                            </tr>`).join('')}
+                        </tbody>
+                    </table>
+                    ${[t.request_note && `📝 叫貨備註：${escHtml(t.request_note)}`, t.ship_note && `📝 出貨備註：${escHtml(t.ship_note)}`, t.receive_note && `📝 進貨備註：${escHtml(t.receive_note)}`]
+                        .filter(Boolean).map(n => `<p class="hint" style="margin-top:4px">${n}</p>`).join('')}
+                    <div style="margin-top: 10px;">
+                        ${step ? `<button onclick="adminTransferStep(${t.id}, '${step}')">${step === 'ship' ? `🚚 代${escHtml(t.from_store)}出貨` : `📥 代${escHtml(t.to_store)}進貨`}</button>` : ''}
+                        ${t.status === 'requested' || t.status === 'shipped' ? `<button class="danger" onclick="adminCancelTransfer(${t.id})">取消這張單</button>` : ''}
+                    </div>`;
+            } catch (error) {
+                cell.innerHTML = `<span style="color:#e03131">載入失敗：${escHtml(error.message)}</span>`;
+            }
+        }
+
+        async function adminTransferStep(id, step) {
+            const items = [...document.querySelectorAll(`#tfDetail${id} input[data-item]`)]
+                .map(i => ({ id: Number(i.dataset.item), qty: i.value === '' ? 0 : Number(i.value) }));
+            if (items.some(i => !Number.isInteger(i.qty) || i.qty < 0)) { alert('數量請填 0 以上的整數'); return; }
+            const t = transfers.find(x => x.id === id);
+            const total = items.reduce((s, i) => s + i.qty, 0);
+            if (!confirm(step === 'ship' ? `代${t.from_store}出貨 ${total} 個？\n\n${t.from_store}庫存會扣除。` : `代${t.to_store}進貨 ${total} 個？\n\n${t.to_store}庫存會增加。`)) return;
+            try {
+                const result = await postJson(`/api/admin/transfers/${id}/${step}`, { items, staff: '後台' });
+                alert(result.message);
+                openTransferId = id;
+                loadTransfers();
+            } catch (error) {
+                alert('操作失敗: ' + error.message);
+            }
+        }
+
+        async function adminCancelTransfer(id) {
+            const t = transfers.find(x => x.id === id);
+            if (!confirm(`確定要取消調貨單 #${id}？` + (t.status === 'shipped' ? `\n\n已經出貨了，取消後會把${t.from_store}扣掉的庫存加回去。` : ''))) return;
+            try {
+                const result = await postJson(`/api/admin/transfers/${id}/cancel`, {});
+                alert(result.message);
+                loadTransfers();
+            } catch (error) {
+                alert('取消失敗: ' + error.message);
+            }
+        }
+
+        async function transferDetails() {
+            return Promise.all(transfers.map(t => api(`/api/admin/transfers/${t.id}`).then(r => r.data)));
+        }
+
+        async function exportTransfers() {
+            if (!transfers.length) { alert('沒有可以匯出的調貨單'); return; }
+            let details;
+            try { details = await transferDetails(); } catch (error) { alert('匯出失敗: ' + error.message); return; }
+            const time = (t) => t ? twDateTime(t) : '';
+            const from = document.getElementById('tfFrom').value || '全部', to = document.getElementById('tfTo').value || '全部';
+            exportXlsxSheets([
+                { name: '調貨單', rows: [['單號', '狀態', '叫貨門市', '出貨門市', '叫貨時間', '叫貨人', '出貨時間', '出貨人', '進貨時間', '進貨人', '叫貨數', '出貨數', '進貨數', '叫貨備註', '出貨備註', '進貨備註'],
+                    ...transfers.map(t => [t.id, TF_STATUS[t.status]?.[0] || t.status, t.to_store, t.from_store, time(t.requested_at), t.requested_by || '',
+                        time(t.shipped_at), t.shipped_by || '', time(t.received_at), t.received_by || '', t.req_total,
+                        t.shipped_at ? t.ship_total : '', t.received_at ? t.recv_total : '', t.request_note || '', t.ship_note || '', t.receive_note || ''])] },
+                { name: '調貨明細', rows: [['單號', '狀態', '叫貨門市', '出貨門市', '叫貨時間', '分類', '商品', '叫貨', '出貨', '進貨'],
+                    ...details.flatMap(t => t.items.map(i => [t.id, TF_STATUS[t.status]?.[0] || t.status, t.to_store, t.from_store, time(t.requested_at),
+                        i.category || '', i.product_name, i.req_qty, i.ship_qty ?? '', i.recv_qty ?? '']))] }
+            ], `野烏金調貨單_${from}_${to}.xlsx`);
+        }
+
+        async function printTransfers() {
+            if (!transfers.length) { alert('沒有可以列印的調貨單'); return; }
+            const win = window.open('', '_blank');
+            if (!win) { alert('瀏覽器擋住了列印視窗，請允許這個網站開啟彈出式視窗'); return; }
+            win.document.write('載入中…');
+            let details;
+            try { details = await transferDetails(); } catch (error) { win.close(); alert('列印失敗: ' + error.message); return; }
+            win.document.open();
+            win.document.write(`<!DOCTYPE html><html lang="zh-TW"><head><meta charset="UTF-8"><title>野烏金 調貨單</title>
+                <style>
+                    @page { size: A4; margin: 12mm; }
+                    body { font-family: 'Microsoft JhengHei', sans-serif; font-size: 12px; color: #222; }
+                    h1 { font-size: 17px; margin: 0 0 4px; }
+                    h2 { font-size: 14px; margin: 18px 0 2px; }
+                    .meta { color: #555; margin-bottom: 4px; }
+                    table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+                    th, td { border: 1px solid #999; padding: 4px 6px; text-align: left; }
+                    th { background: #eee; }
+                    .diff { color: #c00; font-weight: bold; }
+                    .block { page-break-inside: avoid; }
+                    .no-print { margin-bottom: 10px; }
+                    @media print { .no-print { display: none; } }
+                </style></head><body>
+                <div class="no-print"><button onclick="window.print()">🖨️ 列印</button></div>
+                <h1>野烏金 調貨單</h1>
+                <div>列印時間：${twDateTime(new Date())}</div>
+                ${details.map(t => `<div class="block">
+                    <h2>#${t.id}　${escHtml(t.to_store)} 向 ${escHtml(t.from_store)} 叫貨　【${TF_STATUS[t.status]?.[0] || t.status}】</h2>
+                    <div class="meta">叫貨：${twDateTime(t.requested_at)} ${escHtml(t.requested_by || '')}
+                        ${t.shipped_at ? `　出貨：${twDateTime(t.shipped_at)} ${escHtml(t.shipped_by || '')}` : ''}
+                        ${t.received_at ? `　進貨：${twDateTime(t.received_at)} ${escHtml(t.received_by || '')}` : ''}</div>
+                    <table><thead><tr><th>分類</th><th>商品</th><th>叫貨</th><th>出貨</th><th>進貨</th></tr></thead><tbody>
+                    ${t.items.map(i => `<tr><td>${escHtml(i.category || '')}</td><td>${escHtml(i.product_name)}</td><td>${i.req_qty}</td>
+                        <td>${i.ship_qty ?? '-'}</td><td class="${i.recv_qty !== null && i.recv_qty !== i.req_qty ? 'diff' : ''}">${i.recv_qty ?? '-'}</td></tr>`).join('')}
+                    </tbody></table></div>`).join('')}
+                </body></html>`);
+            win.document.close();
         }
 
         // ============ 折扣優惠 ============

@@ -146,6 +146,30 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS stocktake_items_parent_idx ON stocktake_items (stocktake_id);
     -- 從哪台門市平板盤點的（後台盤點是空白）
     ALTER TABLE stocktakes ADD COLUMN IF NOT EXISTS device_name TEXT;
+    -- 門市調貨：to_store 叫貨 → from_store 出貨（庫存 −）→ to_store 進貨（庫存 +）
+    -- status = requested（已叫貨）/ shipped（已出貨、運送中）/ received（已進貨）/ cancelled（已取消）
+    CREATE TABLE IF NOT EXISTS transfer_orders (
+      id           SERIAL PRIMARY KEY,
+      from_store   TEXT NOT NULL,
+      to_store     TEXT NOT NULL,
+      status       TEXT NOT NULL DEFAULT 'requested',
+      requested_by TEXT, requested_at TIMESTAMPTZ NOT NULL DEFAULT NOW(), request_note TEXT,
+      shipped_by   TEXT, shipped_at   TIMESTAMPTZ, ship_note    TEXT,
+      received_by  TEXT, received_at  TIMESTAMPTZ, receive_note TEXT,
+      cancelled_at TIMESTAMPTZ
+    );
+    CREATE TABLE IF NOT EXISTS transfer_items (
+      id           SERIAL PRIMARY KEY,
+      order_id     INTEGER NOT NULL REFERENCES transfer_orders(id) ON DELETE CASCADE,
+      product_id   INTEGER,
+      category     TEXT,
+      product_name TEXT NOT NULL,
+      price        INTEGER NOT NULL DEFAULT 0,
+      req_qty      INTEGER NOT NULL,
+      ship_qty     INTEGER,
+      recv_qty     INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS transfer_items_parent_idx ON transfer_items (order_id);
     -- 前台圖卡圖片：key = 'cat:分類' 或 'series:分類|系列'
     CREATE TABLE IF NOT EXISTS tile_images (
       key     TEXT PRIMARY KEY,
@@ -1257,6 +1281,178 @@ app.post('/api/pos/stocktakes', requireDevice, async (req, res) => {
   const { rows: [{ today }] } = await pool.query(`SELECT to_char((NOW() AT TIME ZONE 'Asia/Taipei')::date, 'YYYY-MM-DD') AS today`);
   const { t, message } = await createStocktake(req.body || {}, deviceStore(req), today, req.device?.name);
   res.json({ status: 'success', message, data: t });
+});
+
+// ============ 門市調貨：叫貨 → 出貨 → 進貨 ============
+const TRANSFER_STATUS = { requested: '已叫貨', shipped: '已出貨', received: '已進貨', cancelled: '已取消' };
+const stockCol = (store) => (store === '高雄' ? 'gaoxiong' : 'taizhong');
+
+// 列表：store（叫貨或出貨方是這家）、status、from / to（叫貨日期）
+async function listTransfers({ store, status, from, to, limit = 1000 }) {
+  const where = [], params = [];
+  if (STORES.includes(store)) { params.push(store); where.push(`(t.from_store = $${params.length} OR t.to_store = $${params.length})`); }
+  if (TRANSFER_STATUS[status]) { params.push(status); where.push(`t.status = $${params.length}`); }
+  const day = `(t.requested_at AT TIME ZONE 'Asia/Taipei')::date`;
+  if (cleanDate(from)) { params.push(from); where.push(`${day} >= $${params.length}::date`); }
+  if (cleanDate(to)) { params.push(to); where.push(`${day} <= $${params.length}::date`); }
+  const { rows } = await pool.query(
+    `SELECT t.*, COUNT(i.id)::int AS items,
+            COALESCE(SUM(i.req_qty), 0)::int AS req_total,
+            COALESCE(SUM(i.ship_qty), 0)::int AS ship_total,
+            COALESCE(SUM(i.recv_qty), 0)::int AS recv_total
+     FROM transfer_orders t LEFT JOIN transfer_items i ON i.order_id = t.id
+     ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+     GROUP BY t.id
+     ORDER BY CASE t.status WHEN 'requested' THEN 0 WHEN 'shipped' THEN 1 ELSE 2 END, t.id DESC
+     LIMIT ${Number(limit) || 1000}`, params);
+  return rows;
+}
+
+async function getTransfer(id, client = pool) {
+  const { rows: [t] } = await client.query('SELECT * FROM transfer_orders WHERE id = $1', [id]);
+  if (!t) return null;
+  const { rows: items } = await client.query('SELECT * FROM transfer_items WHERE order_id = $1 ORDER BY id', [id]);
+  return { ...t, items };
+}
+
+// 叫貨：toStore 向 fromStore 要貨（還不動庫存）
+async function createTransfer(b, toStore) {
+  const fromStore = STORES.find(s => s !== toStore);
+  if (!STORES.includes(toStore)) throw new InputError('請選擇叫貨的門市');
+  const list = (Array.isArray(b.items) ? b.items : [])
+    .map(i => ({ id: Number(i.product_id), qty: toInt(i.qty, '數量') }))
+    .filter(i => Number.isInteger(i.id) && i.qty);
+  if (!list.length) throw new InputError('請至少填一個商品要叫幾個');
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const { rows: [t] } = await client.query(
+      `INSERT INTO transfer_orders (from_store, to_store, requested_by, request_note) VALUES ($1, $2, $3, $4) RETURNING *`,
+      [fromStore, toStore, cleanText(b.staff, 30), cleanText(b.note, 500)]);
+    for (const i of list) {
+      const { rows: [p] } = await client.query('SELECT * FROM products WHERE id = $1', [i.id]);
+      if (!p) continue;
+      await client.query(
+        `INSERT INTO transfer_items (order_id, product_id, category, product_name, price, req_qty) VALUES ($1, $2, $3, $4, $5, $6)`,
+        [t.id, p.id, p.category, productLabel(p), p.price, i.qty]);
+    }
+    await client.query('COMMIT');
+    return t;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// 出貨或收貨：step = 'ship'（出貨方庫存 −）或 'receive'（叫貨方庫存 +）
+// b.items = [{ id: 調貨明細 id, qty }]，沒給的照叫貨（出貨）數量；store = 操作的門市（後台為 null，不檢查）
+async function advanceTransfer(id, step, b, store) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT id FROM transfer_orders WHERE id = $1 FOR UPDATE', [id]);
+    const t = await getTransfer(id, client);
+    if (!t) throw new InputError('找不到這張調貨單');
+    const ship = step === 'ship';
+    if (t.status !== (ship ? 'requested' : 'shipped')) throw new InputError(`這張調貨單目前是「${TRANSFER_STATUS[t.status]}」，不能${ship ? '出貨' : '進貨'}`);
+    const myStore = ship ? t.from_store : t.to_store;
+    if (store && store !== myStore) throw new InputError(`要由${myStore}門市${ship ? '出貨' : '進貨'}`);
+    const given = new Map((Array.isArray(b.items) ? b.items : []).map(i => [Number(i.id), toInt(i.qty, '數量')]));
+    const col = stockCol(myStore);
+    for (const i of t.items) {
+      const fallback = ship ? i.req_qty : i.ship_qty;
+      const qty = given.has(i.id) && given.get(i.id) !== null ? given.get(i.id) : fallback;
+      await client.query(`UPDATE transfer_items SET ${ship ? 'ship_qty' : 'recv_qty'} = $2 WHERE id = $1`, [i.id, qty]);
+      if (i.product_id && qty) await client.query(`UPDATE products SET ${col} = ${col} ${ship ? '-' : '+'} $2 WHERE id = $1`, [i.product_id, qty]);
+    }
+    await client.query(
+      ship
+        ? `UPDATE transfer_orders SET status = 'shipped', shipped_by = $2, shipped_at = NOW(), ship_note = $3 WHERE id = $1`
+        : `UPDATE transfer_orders SET status = 'received', received_by = $2, received_at = NOW(), receive_note = $3 WHERE id = $1`,
+      [id, cleanText(b.staff, 30), cleanText(b.note, 500)]);
+    await client.query('COMMIT');
+    return ship ? `已出貨，${myStore}庫存已扣除` : `已進貨，${myStore}庫存已增加`;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// 取消：已叫貨直接取消；已出貨（後台才可以）把出貨方扣掉的庫存加回去
+async function cancelTransfer(id, store) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('SELECT id FROM transfer_orders WHERE id = $1 FOR UPDATE', [id]);
+    const t = await getTransfer(id, client);
+    if (!t) throw new InputError('找不到這張調貨單');
+    if (t.status === 'received' || t.status === 'cancelled') throw new InputError(`這張調貨單已經${TRANSFER_STATUS[t.status]}，不能取消`);
+    if (store && t.status !== 'requested') throw new InputError('已經出貨了，要取消請到後台處理');
+    if (store && store !== t.to_store && store !== t.from_store) throw new InputError('找不到這張調貨單');
+    if (t.status === 'shipped') {
+      const col = stockCol(t.from_store);
+      for (const i of t.items) if (i.product_id && i.ship_qty) await client.query(`UPDATE products SET ${col} = ${col} + $2 WHERE id = $1`, [i.product_id, i.ship_qty]);
+    }
+    await client.query(`UPDATE transfer_orders SET status = 'cancelled', cancelled_at = NOW() WHERE id = $1`, [id]);
+    await client.query('COMMIT');
+    return t.status === 'shipped' ? `已取消，${t.from_store}出貨的數量已加回庫存` : '已取消叫貨';
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+// 後台
+app.get('/api/admin/transfers', requireAdmin, async (req, res) => {
+  res.json({ status: 'success', data: await listTransfers(req.query) });
+});
+app.get('/api/admin/transfers/:id', requireAdmin, async (req, res) => {
+  const t = await getTransfer(toInt(req.params.id, '調貨單'));
+  if (!t) return res.status(404).json({ status: 'error', message: '找不到這張調貨單' });
+  res.json({ status: 'success', data: t });
+});
+app.post('/api/admin/transfers', requireAdmin, async (req, res) => {
+  const t = await createTransfer(req.body || {}, req.body?.to_store);
+  res.json({ status: 'success', message: `已向${t.from_store}叫貨`, data: t });
+});
+app.post('/api/admin/transfers/:id/ship', requireAdmin, async (req, res) => {
+  res.json({ status: 'success', message: await advanceTransfer(toInt(req.params.id, '調貨單'), 'ship', req.body || {}, null) });
+});
+app.post('/api/admin/transfers/:id/receive', requireAdmin, async (req, res) => {
+  res.json({ status: 'success', message: await advanceTransfer(toInt(req.params.id, '調貨單'), 'receive', req.body || {}, null) });
+});
+app.post('/api/admin/transfers/:id/cancel', requireAdmin, async (req, res) => {
+  res.json({ status: 'success', message: await cancelTransfer(toInt(req.params.id, '調貨單'), null) });
+});
+
+// 前台（門市平板）：只看得到跟自己門市有關的調貨單
+app.get('/api/pos/transfers', requireDevice, async (req, res) => {
+  res.json({ status: 'success', data: await listTransfers({ store: deviceStore(req), limit: 30 }) });
+});
+app.get('/api/pos/transfers/:id', requireDevice, async (req, res) => {
+  const t = await getTransfer(toInt(req.params.id, '調貨單'));
+  const store = deviceStore(req);
+  if (!t || (t.from_store !== store && t.to_store !== store)) return res.status(404).json({ status: 'error', message: '找不到這張調貨單' });
+  res.json({ status: 'success', data: t });
+});
+app.post('/api/pos/transfers', requireDevice, async (req, res) => {
+  const t = await createTransfer(req.body || {}, deviceStore(req));
+  res.json({ status: 'success', message: `已向${t.from_store}叫貨，等${t.from_store}出貨`, data: t });
+});
+app.post('/api/pos/transfers/:id/ship', requireDevice, async (req, res) => {
+  res.json({ status: 'success', message: await advanceTransfer(toInt(req.params.id, '調貨單'), 'ship', req.body || {}, deviceStore(req)) });
+});
+app.post('/api/pos/transfers/:id/receive', requireDevice, async (req, res) => {
+  res.json({ status: 'success', message: await advanceTransfer(toInt(req.params.id, '調貨單'), 'receive', req.body || {}, deviceStore(req)) });
+});
+app.post('/api/pos/transfers/:id/cancel', requireDevice, async (req, res) => {
+  res.json({ status: 'success', message: await cancelTransfer(toInt(req.params.id, '調貨單'), deviceStore(req)) });
 });
 
 // 修改盤點紀錄（日期、盤點人、備註、實際數量）。只改紀錄，不動目前庫存
