@@ -52,6 +52,12 @@ const STORE_KEYS = { '高雄': 'gaoxiong', '台中': 'taizhong' };
 // 商品顯示名稱：「系列-口味」；系列和口味一樣（例如立體手拿盒）就只寫一次
 const productLabel = (p) => (!p.name || p.series === p.name ? p.series : `${p.series}-${p.name}`);
 const PAYMENT_METHODS = ['現金', 'LINE Pay', '信用卡'];
+
+// 雙圓禮盒：任選兩個經典一口吃（可同口味），價格 = 兩個相加，每盒自動折 off 元；賣出時扣兩個口味的庫存
+// （前台 pos-checkout.html 的 BOX 要跟這裡一致）
+const BOX = { name: '雙圓禮盒', series: '經典一口吃', flavors: ['鹽味', '紅酒', '味噌', '花雕', '香辣'], off: 280 };
+// 一筆銷售實際扣庫存的商品：禮盒是組成的兩個口味，其他就是商品本身
+const saleParts = (sale) => (sale.bundle ? sale.bundle.items : [sale.product_id]);
 const STORES = ['高雄', '台中'];
 // 門市顯示名稱（資料裡還是「高雄」「台中」，訊息裡高雄顯示成總部）
 const storeName = (s) => (s === '高雄' ? '高雄總部' : `${s}門市`);
@@ -202,6 +208,8 @@ async function initDb() {
     -- 付款方式（現金 / LINE Pay / 信用卡）與統一編號
     ALTER TABLE sales ADD COLUMN IF NOT EXISTS payment_method TEXT;
     ALTER TABLE sales ADD COLUMN IF NOT EXISTS tax_id TEXT;
+    -- 雙圓禮盒的組成：{ items: [商品 id, 商品 id], off: 每盒折扣 }；一般商品是 NULL
+    ALTER TABLE sales ADD COLUMN IF NOT EXISTS bundle JSONB;
     CREATE INDEX IF NOT EXISTS sales_customer_id_idx ON sales (customer_id);
     -- 人員打卡
     CREATE TABLE IF NOT EXISTS attendance (
@@ -542,45 +550,64 @@ app.post('/api/sales/create', requireDevice, async (req, res) => {
   const store = req.device ? req.device.store : req.body?.store;
   const qty = parseInt(quantity, 10);
   const storeKey = STORE_KEYS[store];
+  // 雙圓禮盒：box = [口味商品 id, 口味商品 id]
+  const isBox = req.body?.box !== undefined;
+  const ids = isBox ? (Array.isArray(req.body.box) ? req.body.box.map(Number) : []) : [Number(product_id)];
 
   if (!qty || qty <= 0) return res.status(400).json({ status: 'error', message: '數量錯誤' });
   if (!storeKey) return res.status(400).json({ status: 'error', message: '門市錯誤' });
   if (!staff) return res.status(400).json({ status: 'error', message: '請選擇銷售人員' });
+  if (isBox && ids.length !== 2) return res.status(400).json({ status: 'error', message: `${BOX.name}要選兩個口味` });
+  if (!ids.every(Number.isInteger)) return res.status(404).json({ status: 'error', message: '商品不存在' });
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const { rows: [product] } = await client.query(
-      'SELECT * FROM products WHERE id = $1 FOR UPDATE', [product_id]);
-    if (!product) {
+    const { rows } = await client.query('SELECT * FROM products WHERE id = ANY($1) FOR UPDATE', [ids]);
+    const parts = ids.map(id => rows.find(p => p.id === id));
+    if (parts.some(p => !p)) {
       await client.query('ROLLBACK');
       return res.status(404).json({ status: 'error', message: '商品不存在' });
     }
-    if (!product.active) {
+    const inactive = parts.find(p => !p.active);
+    if (inactive) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ status: 'error', message: `${product.name} 已下架，請重新整理頁面` });
+      return res.status(400).json({ status: 'error', message: `${inactive.name} 已下架，請重新整理頁面` });
+    }
+    if (isBox && parts.some(p => p.series !== BOX.series || !BOX.flavors.includes(p.name))) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ status: 'error', message: `${BOX.name}口味錯誤，請重新整理頁面` });
     }
 
+    // 單價：一般商品是售價；禮盒是兩個口味相加，每盒再折 BOX.off（記在折扣欄）
+    const price = parts.reduce((s, p) => s + p.price, 0);
+    const boxOff = isBox ? BOX.off * qty : 0;
     // 庫存不足仍可結帳（庫存會變負數，後台看得到），避免庫存沒登錄時店裡無法賣東西
     // 整單折扣分到這個品項的金額（不能超過這項的金額）
     const lineDiscount = toInt(req.body?.discount, '折扣') ?? 0;
-    if (lineDiscount > product.price * qty) {
+    if (boxOff + lineDiscount > price * qty) {
       await client.query('ROLLBACK');
       return res.status(400).json({ status: 'error', message: '折扣不能超過商品金額' });
     }
 
-    await client.query(
-      `UPDATE products SET ${storeKey} = ${storeKey} - $1 WHERE id = $2`, [qty, product.id]);
+    // 禮盒兩個同口味時，同一個商品會扣兩次
+    for (const p of parts) {
+      await client.query(
+        `UPDATE products SET ${storeKey} = ${storeKey} - $1 WHERE id = $2`, [qty, p.id]);
+    }
 
     const { rows: [row] } = await client.query(
       `INSERT INTO sales (product_id, product_name, price, quantity, total, store, staff, customer_name, order_no, discount, customer_id,
-                          payment_method, tax_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13) RETURNING *`,
-      [product.id, productLabel(product), product.price, qty, product.price * qty - lineDiscount,
-       store, staff, (customer_name || '').trim() || '客人', String(order_no || '').slice(0, 40) || null, lineDiscount,
+                          payment_method, tax_id, bundle)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
+      [isBox ? 0 : parts[0].id,
+       isBox ? `${BOX.name}（${parts.map(p => p.name).join('＋')}）` : productLabel(parts[0]),
+       price, qty, price * qty - boxOff - lineDiscount,
+       store, staff, (customer_name || '').trim() || '客人', String(order_no || '').slice(0, 40) || null, boxOff + lineDiscount,
        toInt(req.body?.customer_id, '顧客'),
        PAYMENT_METHODS.includes(req.body?.payment_method) ? req.body.payment_method : null,
-       /^\d{8}$/.test(String(req.body?.tax_id || '')) ? String(req.body.tax_id) : null]
+       /^\d{8}$/.test(String(req.body?.tax_id || '')) ? String(req.body.tax_id) : null,
+       isBox ? JSON.stringify({ items: ids, off: BOX.off }) : null]
     );
     await client.query('COMMIT');
 
@@ -1130,19 +1157,24 @@ app.post('/api/admin/sales/update', requireAdmin, async (req, res) => {
     const newQty = qty ?? sale.quantity;
     const storeKey = STORE_KEYS[sale.store];
     if (newQty !== sale.quantity && storeKey) {
-      // 多賣 → 扣庫存；少賣 → 加回庫存（商品已刪除就略過）
-      await client.query(
-        `UPDATE products SET ${storeKey} = ${storeKey} - $1 WHERE id = $2`, [newQty - sale.quantity, sale.product_id]);
+      // 多賣 → 扣庫存；少賣 → 加回庫存（商品已刪除就略過）；禮盒是兩個口味都調整
+      for (const pid of saleParts(sale)) {
+        await client.query(
+          `UPDATE products SET ${storeKey} = ${storeKey} - $1 WHERE id = $2`, [newQty - sale.quantity, pid]);
+      }
     }
+    // 禮盒每盒的折扣跟著數量變，其他折扣（整單折扣分到的）維持原金額；折扣不超過這項的金額
+    const boxOff = sale.bundle ? sale.bundle.off : 0;
+    const newDiscount = Math.min(boxOff * newQty + Math.max(sale.discount - boxOff * sale.quantity, 0), sale.price * newQty);
     const { rows: [row] } = await client.query(
       `UPDATE sales SET quantity = $2,
-              discount = LEAST(discount, price * $2),
-              total = price * $2 - LEAST(discount, price * $2),
+              discount = $6,
+              total = price * $2 - $6,
               staff = COALESCE($3, staff), customer_name = COALESCE($4, customer_name),
               payment_method = COALESCE($5, payment_method)
        WHERE id = $1 RETURNING *`,
       [id, newQty, String(staff || '').trim() || null,
-       customer_name === undefined ? null : String(customer_name).trim() || '客人', payment]);
+       customer_name === undefined ? null : String(customer_name).trim() || '客人', payment, newDiscount]);
     await client.query('COMMIT');
     res.json({ status: 'success', message: '已修改', data: toRecord(row) });
   } catch (err) {
@@ -1165,8 +1197,10 @@ app.post('/api/admin/sales/delete', requireAdmin, async (req, res) => {
     for (const sale of rows) {
       const storeKey = STORE_KEYS[sale.store];
       if (storeKey) {
-        await client.query(
-          `UPDATE products SET ${storeKey} = ${storeKey} + $1 WHERE id = $2`, [sale.quantity, sale.product_id]);
+        for (const pid of saleParts(sale)) {
+          await client.query(
+            `UPDATE products SET ${storeKey} = ${storeKey} + $1 WHERE id = $2`, [sale.quantity, pid]);
+        }
       }
     }
     await client.query('COMMIT');
