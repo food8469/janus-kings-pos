@@ -180,7 +180,7 @@
                     <input type="text" id="deviceName" placeholder="裝置名稱（例：高雄櫃台平板）">
                     <select id="deviceStore">
                         <option value="" selected disabled>請選擇門市</option>
-                        <option value="高雄">高雄門市</option>
+                        <option value="高雄">高雄總部</option>
                         <option value="台中">台中門市</option>
                     </select>
                     <button onclick="registerThisDevice()">📍 登記為門市裝置</button>
@@ -205,7 +205,7 @@
                 </table>
                 <div class="input-group">
                     <input type="text" id="newStaffName" placeholder="新員工名字">
-                    <select id="newStaffStore"><option value="">兩店都有</option><option value="高雄">高雄</option><option value="台中">台中</option></select>
+                    <select id="newStaffStore"><option value="">兩店都有</option><option value="高雄">高雄總部</option><option value="台中">台中</option></select>
                     <button onclick="addStaff()">➕ 新增員工</button>
                 </div>
                 <p class="hint">密碼是 4～6 位數字，只有員工本人知道，打卡時要輸入。門市選「高雄」或「台中」，前台打卡和結帳的「銷售人員」就只會在那家門市出現；選「兩店都有」兩邊都會出現。</p>
@@ -219,7 +219,7 @@
                 <label>📅 <input type="date" id="closeFrom" onchange="loadCloses()"></label>
                 <span>～</span>
                 <label><input type="date" id="closeTo" onchange="loadCloses()"></label>
-                <select id="closeStore" onchange="loadCloses()"><option value="">全部門市</option><option>高雄</option><option>台中</option></select>
+                <select id="closeStore" onchange="loadCloses()"><option value="">全部門市</option><option value="高雄">高雄總部</option><option value="台中">台中</option></select>
                 <button onclick="loadCloses()">🔄 重新整理</button>
                 <button class="secondary" onclick="exportCloses()">⬇️ 匯出 Excel</button>
                 <button class="secondary" onclick="printCloses()">🖨️ 列印</button>
@@ -252,7 +252,7 @@
                 <div class="input-group">
                     <select id="pcStaff"></select>
                     <select id="pcType"><option value="in">上班</option><option value="out">下班</option></select>
-                    <select id="pcStore"><option value="高雄">高雄</option><option value="台中">台中</option></select>
+                    <select id="pcStore"><option value="高雄">高雄總部</option><option value="台中">台中</option></select>
                     <input type="datetime-local" id="pcTime">
                     <input type="text" id="pcNote" placeholder="備註（例：忘記打卡）" maxlength="200">
                 </div>
@@ -363,7 +363,7 @@
 
             <!-- 篩選 / 匯入匯出 -->
             <div class="filter-bar" style="align-items: center;">
-                <select id="salesStore" onchange="renderSales()"><option value="">全部門市</option><option>高雄</option><option>台中</option></select>
+                <select id="salesStore" onchange="renderSales()"><option value="">全部門市</option><option value="高雄">高雄總部</option><option value="台中">台中</option></select>
                 <select id="salesStaff" onchange="renderSales()"><option value="">全部員工</option></select>
                 <select id="salesPayment" onchange="renderSales()">
                     <option value="">全部付款方式</option><option>現金</option><option>LINE Pay</option><option>信用卡</option><option value="__none">未記錄</option>
@@ -405,7 +405,7 @@
                 <button class="quick-range" onclick="setStaffRange('all')">全部</button>
             </div>
             <div class="filter-bar" style="align-items: center; margin-top: 10px;">
-                <select id="staffStore" onchange="renderStaffStats()"><option value="">全部門市</option><option>高雄</option><option>台中</option></select>
+                <select id="staffStore" onchange="renderStaffStats()"><option value="">全部門市</option><option value="高雄">高雄總部</option><option value="台中">台中</option></select>
                 <button onclick="loadStaffStats()">🔄 重新整理</button>
                 <button class="secondary" onclick="exportStaffStats()">⬇️ 匯出 Excel</button>
                 <button class="secondary" onclick="printStaffStats()">🖨️ 列印</button>
@@ -438,7 +438,7 @@
                     <option value="">全部狀態</option><option value="requested">已叫貨（待出貨）</option>
                     <option value="shipped">已出貨（待進貨）</option><option value="received">已進貨</option><option value="cancelled">已取消</option>
                 </select>
-                <select id="tfTarget" onchange="loadTransfers()"><option value="">全部門市</option><option>高雄</option><option>台中</option></select>
+                <select id="tfTarget" onchange="loadTransfers()"><option value="">全部門市</option><option value="高雄">高雄總部</option><option value="台中">台中</option></select>
                 <button onclick="loadTransfers()">🔄 重新整理</button>
                 <button class="secondary" onclick="exportTransfers()">⬇️ 匯出 Excel</button>
                 <button class="secondary" onclick="printTransfers()">🖨️ 列印</button>
@@ -465,7 +465,7 @@
                 <button class="quick-range" onclick="setStocktakeRange('all')">全部</button>
             </div>
             <div class="filter-bar" style="align-items: center; margin-top: 10px;">
-                <select id="stStore" onchange="loadStocktake()"><option value="">全部門市</option><option>高雄</option><option>台中</option></select>
+                <select id="stStore" onchange="loadStocktake()"><option value="">全部門市</option><option value="高雄">高雄總部</option><option value="台中">台中</option></select>
                 <button onclick="openStocktakeForm()">📝 開始盤點</button>
                 <button onclick="loadStocktake()">🔄 重新整理</button>
                 <button class="secondary" onclick="exportStocktakes()">⬇️ 匯出 Excel</button>
@@ -476,7 +476,7 @@
             <div id="stocktakeForm" class="section" hidden>
                 <h3>📝 新增盤點</h3>
                 <div class="input-group">
-                    <select id="stFormStore" onchange="renderStocktakeForm()"><option>高雄</option><option>台中</option></select>
+                    <select id="stFormStore" onchange="renderStocktakeForm()"><option value="高雄">高雄總部</option><option value="台中">台中</option></select>
                     <input type="date" id="stFormDate" title="盤點日期">
                     <input type="text" id="stFormStaff" maxlength="30" placeholder="盤點人">
                     <input type="text" id="stFormNote" maxlength="500" placeholder="備註（選填）">
@@ -511,6 +511,8 @@
         // 留空時使用本站（後台與 API 在同一個 Railway 服務）
         // 後台和 API 在同一個網站
         const API_URL = () => window.location.origin;
+        // 門市顯示名稱（資料裡還是「高雄」「台中」，只有畫面上高雄顯示成總部）
+        const storeName = (s) => (s === '高雄' ? '高雄總部' : `${s}門市`);
         let products = [];
 
         // 讀取 API，失敗時丟出錯誤訊息
@@ -1264,7 +1266,7 @@
                 try { thisDevice = (await api(`/api/punch-device?token=${encodeURIComponent(token)}`)).data; } catch (e) { /* 已停用或無效 */ }
             }
             status.innerHTML = thisDevice
-                ? `✅ 這台已設定為 <b>${escHtml(thisDevice.store)}門市</b> 裝置（${escHtml(thisDevice.name)}）`
+                ? `✅ 這台已設定為 <b>${storeName(escHtml(thisDevice.store))}</b> 裝置（${escHtml(thisDevice.name)}）`
                 : '⚠️ 這台<b>還不是</b>門市裝置，不能使用收銀台和打卡。';
             status.style.color = thisDevice ? '#2b8a3e' : '#e67700';
             document.getElementById('registerDevice').hidden = !!thisDevice;
@@ -1312,14 +1314,14 @@
             const store = document.getElementById('deviceStore').value;
             if (!name) { alert('請填裝置名稱，例如：高雄櫃台平板'); return; }
             if (!store) { alert('請選擇這台裝置是哪家門市'); return; }
-            if (!confirm(`確定要把「這台裝置」登記為 ${store}門市 的裝置？\n\n請確認你現在是在店裡要用的裝置上操作。`)) return;
+            if (!confirm(`確定要把「這台裝置」登記為 ${storeName(store)} 的裝置？\n\n請確認你現在是在店裡要用的裝置上操作。`)) return;
             try {
                 const device = (await postJson('/api/admin/devices', { name, store })).data;
                 try { localStorage.setItem(DEVICE_KEY, device.token); } catch (e) {
                     alert('這個瀏覽器無法儲存設定（可能是無痕模式），請用一般模式開啟');
                     return;
                 }
-                alert(`完成！這台已登記為 ${store}門市 裝置。`);
+                alert(`完成！這台已登記為 ${storeName(store)} 裝置。`);
                 document.getElementById('deviceName').value = '';
                 loadPunchSettings();
             } catch (error) {
@@ -1628,7 +1630,7 @@
                         <tr data-punch="${p.id}">
                             <td><input type="datetime-local" class="p-time" value="${toLocalInput(p.created_at)}"></td>
                             <td><select class="p-type"><option value="in" ${p.type === 'in' ? 'selected' : ''}>上班</option><option value="out" ${p.type === 'out' ? 'selected' : ''}>下班</option></select></td>
-                            <td><select class="p-store"><option ${p.store === '高雄' ? 'selected' : ''}>高雄</option><option ${p.store === '台中' ? 'selected' : ''}>台中</option></select></td>
+                            <td><select class="p-store"><option value="高雄" ${p.store === '高雄' ? 'selected' : ''}>高雄總部</option><option value="台中" ${p.store === '台中' ? 'selected' : ''}>台中</option></select></td>
                             <td><input type="text" class="p-note" value="${escHtml(p.note || '')}" maxlength="200" style="width: 140px;"></td>
                             <td style="color:#888">${escHtml(p.device_name || '')}</td>
                             <td style="white-space: nowrap;">
@@ -2790,7 +2792,7 @@
             const s = staffStats[i];
             const store = staffStoreFilter();
             const sales = staffSalesOf(s.name);
-            if (!confirm(`確定要刪除「${s.name}」在 ${staffRangeText()}${store ? `（${store}門市）` : ''} 的銷售紀錄？\n\n共 ${sales.length} 筆，${ntd(s.amount)}\n\n刪除後無法復原，商品會加回庫存。\n只想刪其中幾筆，請改按「✏️ 編輯」。`)) return;
+            if (!confirm(`確定要刪除「${s.name}」在 ${staffRangeText()}${store ? `（${storeName(store)}）` : ''} 的銷售紀錄？\n\n共 ${sales.length} 筆，${ntd(s.amount)}\n\n刪除後無法復原，商品會加回庫存。\n只想刪其中幾筆，請改按「✏️ 編輯」。`)) return;
             try {
                 const result = await postJson('/api/admin/sales/delete', { ids: sales.map(r => r.id) });
                 alert(result.message);
@@ -2932,7 +2934,7 @@
             if (items.some(i => !Number.isInteger(i.counted) || i.counted < 0)) { alert('實際數量請填 0 以上的整數'); return; }
             const store = document.getElementById('stFormStore').value;
             const apply = document.getElementById('stFormApply').checked;
-            if (!confirm(`儲存 ${store}門市 的盤點（${items.length} 項）？` + (apply ? `\n\n${store}門市這 ${items.length} 項的庫存會改成實際數量。` : '\n\n庫存不會變動，只記錄盤點結果。'))) return;
+            if (!confirm(`儲存 ${storeName(store)} 的盤點（${items.length} 項）？` + (apply ? `\n\n${storeName(store)}這 ${items.length} 項的庫存會改成實際數量。` : '\n\n庫存不會變動，只記錄盤點結果。'))) return;
             try {
                 const result = await postJson('/api/admin/stocktakes', {
                     store, date: document.getElementById('stFormDate').value, apply, items,
@@ -3001,7 +3003,7 @@
 
         async function deleteStocktake(id) {
             const t = stocktakes.find(x => x.id === id);
-            if (!confirm(`確定要刪除這筆盤點？\n\n${String(t.count_date).slice(0, 10)}　${t.store}門市　${t.staff || ''}\n\n刪除後無法復原（目前庫存不會變動）。`)) return;
+            if (!confirm(`確定要刪除這筆盤點？\n\n${String(t.count_date).slice(0, 10)}　${storeName(t.store)}　${t.staff || ''}\n\n刪除後無法復原（目前庫存不會變動）。`)) return;
             try {
                 await postJson('/api/admin/stocktakes/delete', { id });
                 loadStocktake();
@@ -3056,7 +3058,7 @@
                 <h1>${title}</h1>
                 <div>列印時間：${twDateTime(new Date())}</div>
                 ${details.map(t => `<div class="block">
-                    <h2>${String(t.count_date).slice(0, 10)}　${escHtml(t.store)}門市　盤點人：${escHtml(t.staff || '-')}${t.note ? '　備註：' + escHtml(t.note) : ''}</h2>
+                    <h2>${String(t.count_date).slice(0, 10)}　${storeName(escHtml(t.store))}　盤點人：${escHtml(t.staff || '-')}${t.note ? '　備註：' + escHtml(t.note) : ''}</h2>
                     <table><thead><tr><th>分類</th><th>商品</th><th>系統數量</th><th>實際數量</th><th>差異</th><th>差異金額</th></tr></thead><tbody>
                     ${t.items.map(i => { const d = i.counted_qty - i.system_qty; return `<tr><td>${escHtml(i.category || '')}</td><td>${escHtml(i.product_name)}</td>
                         <td>${i.system_qty}</td><td>${i.counted_qty}</td><td class="${d < 0 ? 'neg' : ''}">${signedNum(d)}</td><td class="${d < 0 ? 'neg' : ''}">${signed(d * i.price)}</td></tr>`; }).join('')}

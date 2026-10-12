@@ -1107,12 +1107,16 @@
             const groups = [...new Set(catOrder.map(groupOf))];
             // 「全部」不分區，所有卡片放在同一個畫面；其他分類有好幾區時才加小標題
             const showHeadings = currentCategory !== ALL_TAB && groups.length > 1;
+            // 雙圓禮盒卡片：「全部」放在頂規整片後面；「一口吃」分類（或沒有頂規整片時）放在經典一口吃後面
+            const boxTile = () => makeTile(tileUrl(`series:一口吃|${BOX.name}`), BOX.name, `任選兩個・每盒折 ${BOX.off}`, openBoxModal);
+            const boxAfterDrill = currentCategory === ALL_TAB && catOrder.includes(BOX.afterAll);
             groups.forEach(group => {
                 if (showHeadings) addHeading(seriesView, group);
                 catOrder.filter(c => groupOf(c) === group).forEach(category => {
                     const ofCategory = list.filter(s => s.category === category);
                     if (DRILL_CATEGORIES.includes(category)) {
                         seriesView.appendChild(makeTile(tileUrl(`cat:${category}`), category, `${ofCategory.length} 種口味`, () => openDrill(category)));
+                        if (boxAfterDrill && category === BOX.afterAll && boxFlavors().length) seriesView.appendChild(boxTile());
                     } else if (SINGLE_TILE_CATEGORIES.includes(category)) {
                         const merged = mergedSeries(category);
                         seriesView.appendChild(makeTile(tileUrl(`cat:${category}`), category,
@@ -1120,11 +1124,7 @@
                     } else {
                         ofCategory.forEach(s => {
                             seriesView.appendChild(seriesTile(s));
-                            // 雙圓禮盒卡片放在經典一口吃後面
-                            if (s.name === BOX.series && boxFlavors().length) {
-                                seriesView.appendChild(makeTile(tileUrl(`series:${s.category}|${BOX.name}`), BOX.name,
-                                    `任選兩個・每盒折 ${BOX.off}`, openBoxModal));
-                            }
+                            if (!boxAfterDrill && s.name === BOX.series && boxFlavors().length) seriesView.appendChild(boxTile());
                         });
                     }
                 });
@@ -1159,7 +1159,8 @@
 
         // ---- 雙圓禮盒：選項一、選項二各選一個經典一口吃（可同口味），價格兩個相加，每盒自動折 off 元 ----
         // （後端 pos-api-server.js 的 BOX 要跟這裡一致）
-        const BOX = { name: '雙圓禮盒', series: '經典一口吃', flavors: ['鹽味', '紅酒', '味噌', '花雕', '香辣'], off: 280 };
+        // afterAll：「全部」畫面裡，禮盒卡片放在這個分類卡後面
+        const BOX = { name: '雙圓禮盒', series: '經典一口吃', flavors: ['鹽味', '紅酒', '味噌', '花雕', '香辣'], off: 280, afterAll: '頂規整片' };
         let boxPick = [null, null];   // 選項一、選項二選的品項
 
         // 可以選的口味（上架中的），照 BOX.flavors 的順序
