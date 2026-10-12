@@ -318,7 +318,7 @@ app.get('/', sendPage('pos-checkout.html'));
 app.get('/admin', requireAdmin, sendPage('pos-admin.html'));
 
 // App 設定檔與圖示（加到主畫面用）
-app.get(/^\/(manifest-(pos|admin)\.webmanifest|icon-(pos|admin)-(180|192|512)\.png)$/, (req, res) => {
+app.get(/^\/(manifest-(pos|admin)\.webmanifest|icon-(pos|admin)-(180|192|512)\.png|tile-gift-box\.jpg)$/, (req, res) => {
   if (req.path.endsWith('.webmanifest')) res.type('application/manifest+json');
   res.sendFile(path.join(__dirname, req.path.slice(1)));
 });
