@@ -1160,9 +1160,10 @@
 
         // ---- 雙圓禮盒：選項一、選項二各選一個經典一口吃（可同口味），價格兩個相加，每盒自動折 off 元 ----
         // （後端 pos-api-server.js 的 BOX 要跟這裡一致）
-        // afterAll：「全部」畫面裡，禮盒卡片放在這個分類卡後面；image：卡片圖片（跟程式放在一起上傳）
+        // afterAll：「全部」畫面裡，禮盒卡片放在這個分類卡後面；
+        // image：卡片圖片（跟程式放在一起上傳）。瀏覽器會快取很久，換圖片時要把 v= 加 1
         const BOX = { name: '雙圓禮盒', series: '經典一口吃', flavors: ['鹽味', '紅酒', '味噌', '花雕', '香辣'], off: 280,
-                      afterAll: '頂規整片', image: 'tile-gift-box.jpg' };
+                      afterAll: '頂規整片', image: 'tile-gift-box.jpg?v=1' };
         let boxPick = [null, null];   // 選項一、選項二選的品項
 
         // 可以選的口味（上架中的），照 BOX.flavors 的順序
