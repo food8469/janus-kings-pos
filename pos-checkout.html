@@ -1476,7 +1476,7 @@
                 <div class="product-name">${nameHtml}</div>
                 <div class="product-price">NT$${item.price}</div>
                 <div class="product-stock ${stockClass}">
-                    ${store}庫存：${stock}${inCart ? `<br>結帳後剩 ${stock - inCart}` : ''}
+                    庫存 ${stock}${inCart ? `<br>結帳後剩 ${stock - inCart}` : ''}
                 </div>
             `;
             card.onclick = onclick;
