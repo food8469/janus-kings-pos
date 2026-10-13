@@ -264,8 +264,10 @@
         .box-tiers .product-name { margin: 0 0 4px; font-size: 16px; }
         .box-option { display: inline-block; background: #ffe8a3; color: #7a5200; padding: 3px 12px; border-radius: 6px; font-size: 15px; }
         .box-fixed-row { display: flex; align-items: center; gap: 10px; }
-        .box-fixed-row .box-fixed { flex: 1; justify-content: center; margin-bottom: 0; }
-        .box-plus { font-size: 22px; font-weight: bold; color: #2b8a3e; }
+        /* 皇者禮盒（整盒固定價）的「已包含」用紫色，跟一般禮盒的綠色區分 */
+        .box-fixed-row .box-fixed { flex: 1; justify-content: center; margin-bottom: 0;
+                                    border-color: #7048e8; background: #f3f0ff; color: #5f3dc4; }
+        .box-plus { font-size: 22px; font-weight: bold; color: #5f3dc4; }
         .box-fixed { display: flex; justify-content: space-between; border: 2px dashed #2f9e44; background: #ebfbee; border-radius: 8px; padding: 10px 14px; font-size: 15px; font-weight: bold; color: #2b8a3e; margin-bottom: 6px; }
         .box-sum { border-top: 1px solid #eee; margin-top: 14px; padding-top: 10px; font-size: 14px; color: #555; }
         .box-sum div { display: flex; justify-content: space-between; padding: 2px 0; }
