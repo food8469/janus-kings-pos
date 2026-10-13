@@ -1132,7 +1132,7 @@
             const addBoxTiles = () => Object.entries(BOXES).forEach(([type, box]) => {
                 if (!boxAvailable(type)) return;
                 seriesView.appendChild(makeTile(tileUrl(`series:一口吃|${box.name}`),
-                    box.name, `任選兩個・每盒折 ${box.off}`, () => openBoxModal(type)));
+                    box.name, `${box.slots.length > 1 ? '任選兩個' : '任選一個'}・每盒折 ${box.off}`, () => openBoxModal(type)));
             });
             const boxAfterDrill = currentCategory === ALL_TAB && catOrder.includes(BOX_TILES_AFTER);
             groups.forEach(group => {
@@ -1195,16 +1195,19 @@
                       slots: [{ title: '選項一', groups: ROUNDS }, { title: '選項二', groups: ROUNDS }] },
             squareRound: { name: '方圓禮盒', off: 180,
                            slots: [{ title: '選項一・方', groups: SQUARES }, { title: '選項二・圓', groups: ROUNDS }] },
-            // fixed：固定附的商品（不用選，用系列＋品名找；也算進價格、扣庫存）。找不到（下架）就不顯示這個禮盒
+            // fixed：固定附的商品（不用選，用系列＋品名找；qty 是幾個，預設 1；也算進價格、扣庫存）。找不到（下架）就不顯示這個禮盒
             trio: { name: '三品禮盒', off: 90,
                     slots: [{ title: '選項一・方', groups: SQUARES }, { title: '選項二・圓', groups: ROUNDS }],
                     fixed: [{ series: '牛奶糖', name: '6入' }] },
+            trioCandy: { name: '三重奏', off: 20,
+                         slots: [{ title: '一口吃', groups: ROUNDS }],
+                         fixed: [{ series: '牛奶糖', name: '6入', qty: 2 }] },
         };
         // 「全部」畫面裡，禮盒卡片放在這個分類卡後面
         const BOX_TILES_AFTER = '頂規整片';
 
         let boxType = null;             // 目前打開的禮盒
-        let boxPick = [null, null];     // 選項一、選項二選的 { item, group }
+        let boxPick = [];               // 每個選項選的 { item, group }
 
         // 一個選項可以選的東西（只有上架中的）：一般群組是 items；整片群組是 flavors（口味 → 各兩數）
         function slotGroups(slot) {
@@ -1215,13 +1218,14 @@
             }).filter(x => (x.flavors || x.items).length);
         }
 
-        // 禮盒固定附的商品（上架中的）；有一個找不到就回傳 null
+        // 禮盒固定附的商品（上架中的）：[{ item, qty }]；有一個找不到就回傳 null
         function boxFixedItems(type) {
-            const items = (BOXES[type].fixed || []).map(f =>
-                seriesData.filter(s => s.name === f.series).flatMap(s => s.items).find(i => i.name === f.name));
-            return items.every(Boolean) ? items : null;
+            const fixed = (BOXES[type].fixed || []).map(f => ({ qty: f.qty || 1,
+                item: seriesData.filter(s => s.name === f.series).flatMap(s => s.items).find(i => i.name === f.name) }));
+            return fixed.every(f => f.item) ? fixed : null;
         }
-        const fixedLabel = (item) => `${item.series} ${item.name}`;
+        // 例：牛奶糖 6入×2
+        const fixedLabel = ({ item, qty }) => `${item.series} ${item.name}${qty > 1 ? `×${qty}` : ''}`;
 
         const boxAvailable = (type) => BOXES[type].slots.every(slot => slotGroups(slot).length) && !!boxFixedItems(type);
         // 禮盒裡品項的名稱：一口吃是品名；整片是「口味 兩數」
@@ -1264,7 +1268,7 @@
 
         function openBoxModal(type) {
             boxType = type;
-            boxPick = [null, null];
+            boxPick = BOXES[type].slots.map(() => null);
             document.getElementById('boxTitle').textContent = BOXES[type].name;
             document.getElementById('boxMessage').innerHTML = '';
             renderBoxModal();
@@ -1332,23 +1336,29 @@
                 head.textContent = '已包含';
                 const grid = document.createElement('div');
                 grid.className = 'box-flavors';
-                fixed.forEach(item => {
-                    const card = boxItemCard(item, fixedLabel(item), true, null);
+                fixed.forEach(f => {
+                    const card = boxItemCard(f.item, fixedLabel(f), true, null);
                     card.style.cursor = 'default';
+                    if (f.qty > 1) card.querySelector('.product-price').textContent =
+                        `NT$${f.item.price.toLocaleString()} × ${f.qty}`;
                     grid.appendChild(card);
                 });
                 options.append(head, grid);
             }
 
-            const [a, b] = boxPick;
-            const labels = a && b ? [boxPartLabel(a), boxPartLabel(b), ...fixed.map(fixedLabel)] : [];
-            const gross = a && b ? a.item.price + b.item.price + fixed.reduce((s, i) => s + i.price, 0) : 0;
-            document.getElementById('boxSum').innerHTML = a && b
+            const done = boxPick.every(Boolean);
+            const labels = done ? [...boxPick.map(boxPartLabel), ...fixed.map(fixedLabel)] : [];
+            const gross = done ? boxGross(fixed) : 0;
+            document.getElementById('boxSum').innerHTML = done
                 ? `<div><span>${labels.map(esc).join(' ＋ ')}</span><span>NT$${gross.toLocaleString()}</span></div>
                    <div class="off"><span>${box.name}折扣</span><span>-NT$${box.off}</span></div>
                    <div class="total"><span>禮盒價</span><span>NT$${(gross - box.off).toLocaleString()}</span></div>`
-                : '<div>請選擇選項一和選項二</div>';
+                : `<div>請選擇${box.slots.map(s => s.title).join('和')}</div>`;
         }
+
+        // 禮盒原價：選的品項＋固定附的商品
+        const boxGross = (fixed) => boxPick.reduce((s, p) => s + p.item.price, 0)
+            + fixed.reduce((s, f) => s + f.item.price * f.qty, 0);
 
         // 整片口味 → 跳出視窗選兩數
         function openBoxWeights(slotIndex, group, series) {
@@ -1367,10 +1377,10 @@
 
         function addBoxToCart() {
             const box = BOXES[boxType];
-            const [a, b] = boxPick;
-            if (!a || !b) {
+            const missing = boxPick.findIndex(p => !p);
+            if (missing >= 0) {
                 document.getElementById('boxMessage').innerHTML =
-                    `<div class="message error">請先選擇${box.slots[!a ? 0 : 1].title}</div>`;
+                    `<div class="message error">請先選擇${box.slots[missing].title}</div>`;
                 return;
             }
             const fixed = boxFixedItems(boxType);
@@ -1381,12 +1391,13 @@
             }
             // 同樣的組合合併成一行，數量 +1
             // box.items 是選的品項（送給後端）；parts 是實際用到的全部商品（含固定附的，算庫存用）
-            const key = `box-${boxType}-${a.item.id}-${b.item.id}`;
+            const ids = boxPick.map(p => p.item.id);
+            const key = `box-${boxType}-${ids.join('-')}`;
             if (!cart[key]) {
-                const gross = a.item.price + b.item.price + fixed.reduce((s, i) => s + i.price, 0);
-                cart[key] = { id: key, box: { type: boxType, items: [a.item.id, b.item.id] },
-                              parts: [a.item.id, b.item.id, ...fixed.map(i => i.id)], off: box.off,
-                              name: `${box.name}（${[boxPartLabel(a), boxPartLabel(b), ...fixed.map(fixedLabel)].join('＋')}）`, series: '',
+                const gross = boxGross(fixed);
+                cart[key] = { id: key, box: { type: boxType, items: ids },
+                              parts: [...ids, ...fixed.flatMap(f => Array(f.qty).fill(f.item.id))], off: box.off,
+                              name: `${box.name}（${[...boxPick.map(boxPartLabel), ...fixed.map(fixedLabel)].join('＋')}）`, series: '',
                               gross, price: gross - box.off, qty: 0 };
             }
             cart[key].qty += 1;

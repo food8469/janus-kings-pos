@@ -56,7 +56,7 @@ const PAYMENT_METHODS = ['現金', 'LINE Pay', '信用卡'];
 // 禮盒：選項一、選項二各選一個商品（可同一個），價格 = 兩個相加，每盒自動折 off 元；賣出時扣兩個商品的庫存
 // slots：每個選項可以選的商品群組；群組用系列（可限定品名）或大分類（整片：口味再選兩數）指定
 // prefix：報表名稱前面加的字，避免跟經典款同名（例：頂規竹鹽）
-// fixed：禮盒固定附的商品（不用選，用系列＋品名找；也算進價格、扣庫存）
+// fixed：禮盒固定附的商品（不用選，用系列＋品名找；qty 是幾個，預設 1；也算進價格、扣庫存）
 // （前台 pos-checkout.html 的 BOXES 要跟這裡一致）
 const CLASSIC_ROUND = { series: '經典一口吃', names: ['鹽味', '紅酒', '味噌', '花雕', '香辣'] };
 const ROUNDS = [CLASSIC_ROUND, { series: '頂規一口吃', prefix: '頂規' }, { series: '混搭款' }];
@@ -65,7 +65,10 @@ const BOXES = {
   double: { name: '雙圓禮盒', off: 280, slots: [ROUNDS, ROUNDS] },
   squareRound: { name: '方圓禮盒', off: 180, slots: [SQUARES, ROUNDS] },
   trio: { name: '三品禮盒', off: 90, slots: [SQUARES, ROUNDS], fixed: [{ series: '牛奶糖', name: '6入' }] },
+  trioCandy: { name: '三重奏', off: 20, slots: [ROUNDS], fixed: [{ series: '牛奶糖', name: '6入', qty: 2 }] },
 };
+// 固定附的商品在報表上的名稱（例：牛奶糖 6入×2）
+const fixedPartLabel = (f) => `${f.series} ${f.name}${(f.qty || 1) > 1 ? `×${f.qty}` : ''}`;
 // 商品屬於這個選項的哪個群組（不屬於就是 undefined）
 const boxGroup = (slot, p) => slot.find(g => (g.category ? p.category === g.category
   : p.series === g.series && (!g.names || g.names.includes(p.name))));
@@ -591,7 +594,8 @@ app.post('/api/sales/create', requireDevice, async (req, res) => {
         await client.query('ROLLBACK');
         return res.status(400).json({ status: 'error', message: `${f.series} ${f.name} 已下架，${box.name}暫時不能賣` });
       }
-      fixedIds.push(p.id);
+      // 要幾個就放幾次，扣庫存時同一個商品會扣好幾次
+      for (let n = 0; n < (f.qty || 1); n++) fixedIds.push(p.id);
     }
     const allIds = [...ids, ...fixedIds];
     const { rows } = await client.query('SELECT * FROM products WHERE id = ANY($1) FOR UPDATE', [allIds]);
@@ -633,7 +637,7 @@ app.post('/api/sales/create', requireDevice, async (req, res) => {
                           payment_method, tax_id, bundle)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
       [isBox ? 0 : parts[0].id,
-       isBox ? `${box.name}（${parts.map((p, i) => (groups[i] ? boxPartLabel(groups[i], p) : `${p.series} ${p.name}`)).join('＋')}）`
+       isBox ? `${box.name}（${[...groups.map((g, i) => boxPartLabel(g, parts[i])), ...(box.fixed || []).map(fixedPartLabel)].join('＋')}）`
              : productLabel(parts[0]),
        price, qty, price * qty - boxOff - lineDiscount,
        store, staff, (customer_name || '').trim() || '客人', String(order_no || '').slice(0, 40) || null, boxOff + lineDiscount,
