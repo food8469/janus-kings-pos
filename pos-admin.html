@@ -1974,11 +1974,16 @@
         function seriesRowIfNeeded(g, p, i) {
             if (TILE_CATEGORIES.includes(g.category)) return '';
             if (g.items.findIndex(x => x.series === p.series) !== i) return '';
-            return `<tr class="series-row" data-cat="${escHtml(g.category)}" ${collapsedCategories.has(g.category) ? 'hidden' : ''}>
+            const row = (key, label) => `<tr class="series-row" data-cat="${escHtml(g.category)}" ${collapsedCategories.has(g.category) ? 'hidden' : ''}>
                 <td></td><td></td>
-                <td colspan="6">${tileThumb(`series:${g.category}|${p.series}`, `${p.series} 的前台圖卡`)}<b>${escHtml(p.series)}</b></td>
+                <td colspan="6">${tileThumb(key, `${label} 的前台圖卡`)}<b>${escHtml(label)}</b></td>
             </tr>`;
+            // 經典一口吃後面多兩列：前台的禮盒卡片圖片（前台 pos-checkout 用 series:一口吃|禮盒名稱）
+            const boxRows = p.series === '經典一口吃'
+                ? GIFT_BOXES.map(name => row(`series:一口吃|${name}`, `${name}（前台禮盒卡片）`)).join('') : '';
+            return row(`series:${g.category}|${p.series}`, p.series) + boxRows;
         }
+        const GIFT_BOXES = ['雙圓禮盒', '方圓禮盒'];
 
         let tileTargetKey = null;
         function pickTileImage(key) {

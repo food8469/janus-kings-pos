@@ -335,11 +335,6 @@ app.get(/^\/(manifest-(pos|admin)\.webmanifest|icon-(pos|admin)-(180|192|512)\.p
   res.sendFile(path.join(__dirname, req.path.slice(1)));
 });
 
-// 雙圓禮盒卡片圖片：網址帶 ?v= 版本號，瀏覽器可以長期快取（跟其他卡片圖片一樣，不用每次重新確認）
-app.get('/tile-gift-box.jpg', (req, res) => {
-  res.sendFile(path.join(__dirname, 'tile-gift-box.jpg'), { maxAge: '365d', immutable: true });
-});
-
 // ============ API 端點 ============
 
 // 1. 獲得庫存

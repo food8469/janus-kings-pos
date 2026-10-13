@@ -1124,7 +1124,7 @@
             // 禮盒卡片（雙圓、方圓）：「全部」放在頂規整片後面；「一口吃」分類（或沒有頂規整片時）放在經典一口吃後面
             const addBoxTiles = () => Object.entries(BOXES).forEach(([type, box]) => {
                 if (!boxAvailable(type)) return;
-                seriesView.appendChild(makeTile(tileUrl(`series:一口吃|${box.name}`) || (box.image && `${API_URL()}/${box.image}`),
+                seriesView.appendChild(makeTile(tileUrl(`series:一口吃|${box.name}`),
                     box.name, `任選兩個・每盒折 ${box.off}`, () => openBoxModal(type)));
             });
             const boxAfterDrill = currentCategory === ALL_TAB && catOrder.includes(BOX_TILES_AFTER);
@@ -1178,12 +1178,12 @@
         // ---- 禮盒（雙圓、方圓）：選項一、選項二各選一個品項（可同一個），價格兩個相加，每盒自動折 off 元 ----
         // slots：每個選項的商品群組。群組用系列（names 可限定品名、照這個順序）或大分類（整片：點口味再選兩數）指定
         // prefix：品項名稱前面加的字，避免跟經典款同名（例：頂規竹鹽）
-        // image：卡片圖片（跟程式放在一起上傳）。瀏覽器會快取很久，換圖片時要把 v= 加 1
+        // 卡片圖片在後台「庫存管理」經典一口吃底下的禮盒列上傳（key = series:一口吃|禮盒名稱）
         // （後端 pos-api-server.js 的 BOXES 要跟這裡一致）
         const CLASSIC_ROUND = { label: '經典一口吃', series: '經典一口吃', names: ['鹽味', '紅酒', '味噌', '花雕', '香辣'] };
         const ROUNDS = [CLASSIC_ROUND, { label: '頂規一口吃', series: '頂規一口吃', prefix: '頂規' }, { label: '混搭款', series: '混搭款' }];
         const BOXES = {
-            double: { name: '雙圓禮盒', off: 280, image: 'tile-gift-box.jpg?v=1',
+            double: { name: '雙圓禮盒', off: 280,
                       slots: [{ title: '選項一', groups: ROUNDS }, { title: '選項二', groups: ROUNDS }] },
             squareRound: { name: '方圓禮盒', off: 180,
                            slots: [{ title: '選項一・方', groups: [{ label: '整片系列', category: '整片系列' },
