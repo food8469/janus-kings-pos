@@ -258,6 +258,7 @@
         .box-flavors .product-card { padding: 10px 4px; }
         .box-flavors .product-name { margin: 0 0 4px; font-size: 15px; }
         .box-flavors .product-stock { font-size: 11px; }
+        .box-fixed { display: flex; justify-content: space-between; border: 2px dashed #ddd; border-radius: 8px; padding: 10px 14px; font-size: 15px; color: #333; margin-bottom: 6px; }
         .box-sum { border-top: 1px solid #eee; margin-top: 14px; padding-top: 10px; font-size: 14px; color: #555; }
         .box-sum div { display: flex; justify-content: space-between; padding: 2px 0; }
         .box-sum .off { color: #e03131; }
@@ -1334,16 +1335,14 @@
                 const head = document.createElement('div');
                 head.className = 'box-title';
                 head.textContent = '已包含';
-                const grid = document.createElement('div');
-                grid.className = 'box-flavors';
+                options.appendChild(head);
+                // 一行就好，只寫名稱（例：牛奶糖 6入×2）；價格算在下面的禮盒價裡
                 fixed.forEach(f => {
-                    const card = boxItemCard(f.item, fixedLabel(f), true, null);
-                    card.style.cursor = 'default';
-                    if (f.qty > 1) card.querySelector('.product-price').textContent =
-                        `NT$${f.item.price.toLocaleString()} × ${f.qty}`;
-                    grid.appendChild(card);
+                    const row = document.createElement('div');
+                    row.className = 'box-fixed';
+                    row.textContent = fixedLabel(f);
+                    options.appendChild(row);
                 });
-                options.append(head, grid);
             }
 
             const done = boxPick.every(Boolean);
