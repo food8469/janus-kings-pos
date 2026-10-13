@@ -263,6 +263,9 @@
         .box-tiers .product-card { padding: 12px 4px; }
         .box-tiers .product-name { margin: 0 0 4px; font-size: 16px; }
         .box-option { display: inline-block; background: #ffe8a3; color: #7a5200; padding: 3px 12px; border-radius: 6px; font-size: 15px; }
+        .box-fixed-row { display: flex; align-items: center; gap: 10px; }
+        .box-fixed-row .box-fixed { flex: 1; justify-content: center; margin-bottom: 0; }
+        .box-plus { font-size: 22px; font-weight: bold; color: #2b8a3e; }
         .box-fixed { display: flex; justify-content: space-between; border: 2px dashed #2f9e44; background: #ebfbee; border-radius: 8px; padding: 10px 14px; font-size: 15px; font-weight: bold; color: #2b8a3e; margin-bottom: 6px; }
         .box-sum { border-top: 1px solid #eee; margin-top: 14px; padding-top: 10px; font-size: 14px; color: #555; }
         .box-sum div { display: flex; justify-content: space-between; padding: 2px 0; }
@@ -1138,7 +1141,8 @@
             const addBoxTiles = () => Object.entries(BOXES).forEach(([type, box]) => {
                 if (!boxAvailable(type)) return;
                 seriesView.appendChild(makeTile(tileUrl(`series:一口吃|${box.name}`),
-                    box.name, [box.slots.length > 1 ? '任選兩個' : '任選一個', box.off ? `每盒折 ${box.off}` : ''].filter(Boolean).join('・'),
+                    box.name, box.price ? `NT$${box.price.toLocaleString()}`
+                        : [box.slots.length > 1 ? '任選兩個' : '任選一個', box.off ? `每盒折 ${box.off}` : ''].filter(Boolean).join('・'),
                     () => openBoxModal(type)));
             });
             const boxAfterDrill = currentCategory === ALL_TAB && catOrder.includes(BOX_TILES_AFTER);
@@ -1215,6 +1219,9 @@
             seared: { name: '炙燒禮盒', off: 0, layout: 'tiers',
                       slots: [{ title: '選項', groups: [{ label: '混搭款', series: '混搭款', names: ['五珍', '珍味'] }] }],
                       prices: { 五珍: 1880, 珍味: 2080 } },
+            // price：整盒固定價（不看裡面商品的售價）；皇者禮盒不用選，兩樣都是固定附的
+            royal: { name: '皇者禮盒', off: 0, price: 12888, slots: [],
+                     fixed: [{ category: '頂規整片', series: '黑松露', name: '十兩' }, { category: '頂規整片', series: '竹鹽', name: '十兩' }] },
         };
         // 品項在目前這個禮盒裡的價格（有固定禮盒價就用固定價）
         function boxPrice(item) {
@@ -1239,7 +1246,8 @@
         // 禮盒固定附的商品（上架中的）：[{ item, qty }]；有一個找不到就回傳 null
         function boxFixedItems(type) {
             const fixed = (BOXES[type].fixed || []).map(f => ({ qty: f.qty || 1,
-                item: seriesData.filter(s => s.name === f.series).flatMap(s => s.items).find(i => i.name === f.name) }));
+                item: seriesData.filter(s => s.name === f.series && (!f.category || s.category === f.category))
+                    .flatMap(s => s.items).find(i => i.name === f.name) }));
             return fixed.every(f => f.item) ? fixed : null;
         }
         // 例：牛奶糖 6入×2
@@ -1373,13 +1381,22 @@
                 head.className = 'box-title';
                 head.textContent = '已包含';
                 options.appendChild(head);
-                // 一行就好：左邊名稱（例：牛奶糖 6入×2），右邊小計
-                fixed.forEach(f => {
+                if (box.price) {
+                    // 整盒固定價（皇者禮盒）：只寫名稱、並排，中間放「＋」；單項價格不寫，免得跟禮盒價搞混
                     const row = document.createElement('div');
-                    row.className = 'box-fixed';
-                    row.innerHTML = `<span>${esc(fixedLabel(f))}</span><span>NT$${(f.item.price * f.qty).toLocaleString()}</span>`;
+                    row.className = 'box-fixed-row';
+                    row.innerHTML = fixed.map(f => `<div class="box-fixed">${esc(fixedLabel(f))}</div>`)
+                        .join('<span class="box-plus">＋</span>');
                     options.appendChild(row);
-                });
+                } else {
+                    // 一行就好：左邊名稱（例：牛奶糖 6入×2），右邊小計
+                    fixed.forEach(f => {
+                        const row = document.createElement('div');
+                        row.className = 'box-fixed';
+                        row.innerHTML = `<span>${esc(fixedLabel(f))}</span><span>NT$${(f.item.price * f.qty).toLocaleString()}</span>`;
+                        options.appendChild(row);
+                    });
+                }
             }
 
             const done = boxPick.every(Boolean);
@@ -1392,9 +1409,9 @@
                 : `<div>請選擇${box.slots.map(s => s.title).join('和')}</div>`;
         }
 
-        // 禮盒原價：選的品項＋固定附的商品
-        const boxGross = (fixed) => boxPick.reduce((s, p) => s + boxPrice(p.item), 0)
-            + fixed.reduce((s, f) => s + f.item.price * f.qty, 0);
+        // 禮盒原價：整盒固定價（box.price），或選的品項＋固定附的商品
+        const boxGross = (fixed) => BOXES[boxType].price ?? (boxPick.reduce((s, p) => s + boxPrice(p.item), 0)
+            + fixed.reduce((s, f) => s + f.item.price * f.qty, 0));
 
         // 整片口味 → 跳出視窗選兩數
         function openBoxWeights(slotIndex, group, series) {

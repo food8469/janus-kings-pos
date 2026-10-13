@@ -71,6 +71,9 @@ const BOXES = {
   // prices：選到這個品名時用固定的禮盒價，不看後台售價（炙燒禮盒含器具、包材）
   seared: { name: '炙燒禮盒', off: 0, slots: [[{ series: '混搭款', names: ['五珍', '珍味'] }]],
             prices: { 五珍: 1880, 珍味: 2080 } },
+  // price：整盒固定價（不看裡面商品的售價）；皇者禮盒不用選，兩樣都是固定附的
+  royal: { name: '皇者禮盒', off: 0, price: 12888, slots: [],
+           fixed: [{ category: '頂規整片', series: '黑松露', name: '十兩' }, { category: '頂規整片', series: '竹鹽', name: '十兩' }] },
 };
 // 固定附的商品在報表上的名稱（例：牛奶糖 6入×2）
 const fixedPartLabel = (f) => `${f.series} ${f.name}${(f.qty || 1) > 1 ? `×${f.qty}` : ''}`;
@@ -594,7 +597,8 @@ app.post('/api/sales/create', requireDevice, async (req, res) => {
     const fixedIds = [];
     for (const f of (box && box.fixed) || []) {
       const { rows: [p] } = await client.query(
-        'SELECT id FROM products WHERE series = $1 AND name = $2 AND active ORDER BY id LIMIT 1', [f.series, f.name]);
+        `SELECT id FROM products WHERE series = $1 AND name = $2 AND active ${f.category ? 'AND category = $3' : ''}
+         ORDER BY id LIMIT 1`, f.category ? [f.series, f.name, f.category] : [f.series, f.name]);
       if (!p) {
         await client.query('ROLLBACK');
         return res.status(400).json({ status: 'error', message: `${f.series} ${f.name} 已下架，${box.name}暫時不能賣` });
@@ -622,7 +626,8 @@ app.post('/api/sales/create', requireDevice, async (req, res) => {
 
     // 單價：一般商品是售價；禮盒是裡面的商品全部相加，每盒再折 box.off（記在折扣欄）
     // 禮盒有設固定價（box.prices）的品項，用固定價；固定附的商品照售價
-    const price = parts.reduce((s, p, i) =>
+    // 整盒固定價（box.price）的禮盒直接用固定價
+    const price = box?.price ?? parts.reduce((s, p, i) =>
       s + (i < ids.length && box?.prices && Object.hasOwn(box.prices, p.name) ? box.prices[p.name] : p.price), 0);
     const boxOff = isBox ? box.off * qty : 0;
     // 庫存不足仍可結帳（庫存會變負數，後台看得到），避免庫存沒登錄時店裡無法賣東西
