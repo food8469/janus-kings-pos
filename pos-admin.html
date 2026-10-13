@@ -1760,7 +1760,8 @@
                         <td><button class="status-toggle ${p.active ? 'on' : 'off'}" onclick="toggleProductActive(${p.id}, this)"
                             title="點一下切換上架 / 下架">${p.active ? '🟢 上架中' : '⚪ 下架中'}</button></td>
                     </tr>
-                `).join('')).join('');
+                `).join('')).join('')
+                + (inventoryFilter ? '' : giftTileRows());   // 篩選某個分類時不顯示禮盒圖片
 
             // 勾選狀態保留（已刪除的商品移除）
             checkedIds = new Set([...checkedIds].filter(id => products.some(p => p.id === id)));
@@ -1974,16 +1975,35 @@
         function seriesRowIfNeeded(g, p, i) {
             if (TILE_CATEGORIES.includes(g.category)) return '';
             if (g.items.findIndex(x => x.series === p.series) !== i) return '';
-            const row = (key, label) => `<tr class="series-row" data-cat="${escHtml(g.category)}" ${collapsedCategories.has(g.category) ? 'hidden' : ''}>
+            return `<tr class="series-row" data-cat="${escHtml(g.category)}" ${collapsedCategories.has(g.category) ? 'hidden' : ''}>
                 <td></td><td></td>
-                <td colspan="6">${tileThumb(key, `${label} 的前台圖卡`)}<b>${escHtml(label)}</b></td>
+                <td colspan="6">${tileThumb(`series:${g.category}|${p.series}`, `${p.series} 的前台圖卡`)}<b>${escHtml(p.series)}</b></td>
             </tr>`;
-            // 經典一口吃後面多兩列：前台的禮盒卡片圖片（前台 pos-checkout 用 series:一口吃|禮盒名稱）
-            const boxRows = p.series === '經典一口吃'
-                ? GIFT_BOXES.map(name => row(`series:一口吃|${name}`, `${name}（前台禮盒卡片）`)).join('') : '';
-            return row(`series:${g.category}|${p.series}`, p.series) + boxRows;
         }
+
+        // ---- 禮盒卡片圖片：庫存表最下面自己一個分類，預設收合（前台 pos-checkout 用 series:一口吃|禮盒名稱）----
         const GIFT_BOXES = ['雙圓禮盒', '方圓禮盒', '三品禮盒', '三重奏', '炙燒禮盒'];
+        const GIFT_OPEN_KEY = 'pos_gift_tiles_open';
+        let giftTilesOpen = (() => { try { return localStorage.getItem(GIFT_OPEN_KEY) === '1'; } catch (e) { return false; } })();
+
+        function giftTileRows() {
+            return `<tr class="group-row gift-tiles-head">
+                <td class="sort-cell"><button class="collapse-btn" title="收合 / 展開" onclick="toggleGiftTiles()">${giftTilesOpen ? '▾' : '▸'}</button></td>
+                <td></td>
+                <td colspan="6" class="group-title" onclick="toggleGiftTiles()">禮盒卡片圖片（${GIFT_BOXES.length}）</td>
+            </tr>` + GIFT_BOXES.map(name => `<tr class="series-row gift-tile-row" ${giftTilesOpen ? '' : 'hidden'}>
+                <td></td><td></td>
+                <td colspan="6">${tileThumb(`series:一口吃|${name}`, `${name} 的前台圖卡`)}<b>${escHtml(name)}</b></td>
+            </tr>`).join('');
+        }
+
+        function toggleGiftTiles(open = !giftTilesOpen) {
+            giftTilesOpen = open;
+            try { localStorage.setItem(GIFT_OPEN_KEY, open ? '1' : '0'); } catch (e) { /* 無痕模式存不了就算了 */ }
+            document.querySelectorAll('#inventoryTable tr.gift-tile-row').forEach(tr => tr.hidden = !open);
+            const btn = document.querySelector('#inventoryTable tr.gift-tiles-head .collapse-btn');
+            if (btn) btn.textContent = open ? '▾' : '▸';
+        }
 
         let tileTargetKey = null;
         function pickTileImage(key) {
@@ -2031,7 +2051,7 @@
 
         function applyCollapsed() {
             document.querySelectorAll('#inventoryTable tr[data-cat]').forEach(tr => tr.hidden = collapsedCategories.has(tr.dataset.cat));
-            document.querySelectorAll('#inventoryTable tr.group-row').forEach(tr => {
+            document.querySelectorAll('#inventoryTable tr.group-row:not(.gift-tiles-head)').forEach(tr => {
                 const btn = tr.querySelector('.collapse-btn');
                 if (btn) btn.textContent = collapsedCategories.has(tr.dataset.category) ? '▸' : '▾';
             });
@@ -2047,6 +2067,7 @@
             collapsedCategories = new Set(collapse ? products.map(p => p.category) : []);
             saveCollapsed();
             applyCollapsed();
+            toggleGiftTiles(!collapse);
         }
 
 
