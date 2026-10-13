@@ -68,6 +68,9 @@ const BOXES = {
   squareRound: { name: '方圓禮盒', off: 180, slots: [SQUARES, ROUNDS_PLUS] },
   trio: { name: '三品禮盒', off: 90, slots: [SQUARES, ROUNDS_PLUS], fixed: [{ series: '牛奶糖', name: '6入' }] },
   trioCandy: { name: '三重奏', off: 20, slots: [ROUNDS_PLUS], fixed: [{ series: '牛奶糖', name: '6入', qty: 2 }] },
+  // prices：選到這個品名時用固定的禮盒價，不看後台售價（炙燒禮盒含器具、包材）
+  seared: { name: '炙燒禮盒', off: 0, slots: [[{ series: '混搭款', names: ['五珍', '珍味'] }]],
+            prices: { 五珍: 1880, 珍味: 2080 } },
 };
 // 固定附的商品在報表上的名稱（例：牛奶糖 6入×2）
 const fixedPartLabel = (f) => `${f.series} ${f.name}${(f.qty || 1) > 1 ? `×${f.qty}` : ''}`;
@@ -618,7 +621,9 @@ app.post('/api/sales/create', requireDevice, async (req, res) => {
     }
 
     // 單價：一般商品是售價；禮盒是裡面的商品全部相加，每盒再折 box.off（記在折扣欄）
-    const price = parts.reduce((s, p) => s + p.price, 0);
+    // 禮盒有設固定價（box.prices）的品項，用固定價；固定附的商品照售價
+    const price = parts.reduce((s, p, i) =>
+      s + (i < ids.length && box?.prices && Object.hasOwn(box.prices, p.name) ? box.prices[p.name] : p.price), 0);
     const boxOff = isBox ? box.off * qty : 0;
     // 庫存不足仍可結帳（庫存會變負數，後台看得到），避免庫存沒登錄時店裡無法賣東西
     // 整單折扣分到這個品項的金額（不能超過這項的金額）

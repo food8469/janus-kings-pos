@@ -258,6 +258,10 @@
         .box-flavors .product-card { padding: 10px 4px; }
         .box-flavors .product-name { margin: 0 0 4px; font-size: 15px; }
         .box-flavors .product-stock { font-size: 11px; }
+        .box-tiers { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-top: 12px; }
+        .box-tiers .box-option { margin-bottom: 8px; }
+        .box-tiers .product-card { padding: 12px 4px; }
+        .box-tiers .product-name { margin: 0 0 4px; font-size: 16px; }
         .box-option { display: inline-block; background: #ffe8a3; color: #7a5200; padding: 3px 12px; border-radius: 6px; font-size: 15px; }
         .box-fixed { display: flex; justify-content: space-between; border: 2px dashed #2f9e44; background: #ebfbee; border-radius: 8px; padding: 10px 14px; font-size: 15px; font-weight: bold; color: #2b8a3e; margin-bottom: 6px; }
         .box-sum { border-top: 1px solid #eee; margin-top: 14px; padding-top: 10px; font-size: 14px; color: #555; }
@@ -1134,7 +1138,8 @@
             const addBoxTiles = () => Object.entries(BOXES).forEach(([type, box]) => {
                 if (!boxAvailable(type)) return;
                 seriesView.appendChild(makeTile(tileUrl(`series:一口吃|${box.name}`),
-                    box.name, `${box.slots.length > 1 ? '任選兩個' : '任選一個'}・每盒折 ${box.off}`, () => openBoxModal(type)));
+                    box.name, [box.slots.length > 1 ? '任選兩個' : '任選一個', box.off ? `每盒折 ${box.off}` : ''].filter(Boolean).join('・'),
+                    () => openBoxModal(type)));
             });
             const boxAfterDrill = currentCategory === ALL_TAB && catOrder.includes(BOX_TILES_AFTER);
             groups.forEach(group => {
@@ -1206,7 +1211,16 @@
             trioCandy: { name: '三重奏', off: 20,
                          slots: [{ title: '選項', groups: ROUNDS_PLUS }],
                          fixed: [{ series: '牛奶糖', name: '6入', qty: 2 }] },
+            // prices：選到這個品名時用固定的禮盒價，不看後台售價（炙燒禮盒含器具、包材）
+            seared: { name: '炙燒禮盒', off: 0, layout: 'tiers',
+                      slots: [{ title: '選項', groups: [{ label: '混搭款', series: '混搭款', names: ['五珍', '珍味'] }] }],
+                      prices: { 五珍: 1880, 珍味: 2080 } },
         };
+        // 品項在目前這個禮盒裡的價格（有固定禮盒價就用固定價）
+        function boxPrice(item) {
+            const prices = BOXES[boxType] && BOXES[boxType].prices;
+            return prices && Object.hasOwn(prices, item.name) ? prices[item.name] : item.price;
+        }
         // 「全部」畫面裡，禮盒卡片放在這個分類卡後面
         const BOX_TILES_AFTER = '頂規整片';
 
@@ -1263,7 +1277,7 @@
             card.className = 'product-card' + (selected ? ' selected' : '');
             card.innerHTML = `
                 <div class="product-name">${esc(title)}</div>
-                <div class="product-price">NT$${item.price.toLocaleString()}</div>
+                <div class="product-price">NT$${boxPrice(item).toLocaleString()}</div>
                 <div class="product-stock ${left <= 0 ? 'out' : left <= 5 ? 'low' : ''}">庫存 ${left}</div>
             `;
             card.onclick = onclick;
@@ -1299,6 +1313,25 @@
             const options = document.getElementById('boxOptions');
             options.innerHTML = '';
             box.slots.forEach((slot, si) => {
+                const groups = slotGroups(slot);
+                const picked = boxPick[si];
+                // layout: 'tiers'（炙燒禮盒）：每個品項一欄並排，黃色標題寫「禮盒名 價格」，下面是品項卡（不重複寫價格）
+                if (box.layout === 'tiers') {
+                    const row = document.createElement('div');
+                    row.className = 'box-tiers';
+                    groups.forEach(({ g, items }) => (items || []).forEach(item => {
+                        const col = document.createElement('div');
+                        const tag = document.createElement('span');
+                        tag.className = 'box-option';
+                        tag.textContent = `${box.name} NT$${boxPrice(item).toLocaleString()}`;
+                        const card = boxItemCard(item, item.name, picked && picked.item.id === item.id, () => pickBox(si, item, g));
+                        card.querySelector('.product-price').remove();
+                        col.append(tag, card);
+                        row.appendChild(col);
+                    }));
+                    options.appendChild(row);
+                    return;
+                }
                 const head = document.createElement('div');
                 head.className = 'box-title';
                 const tag = document.createElement('span');
@@ -1306,8 +1339,6 @@
                 tag.textContent = slot.title;
                 head.appendChild(tag);
                 options.appendChild(head);
-                const groups = slotGroups(slot);
-                const picked = boxPick[si];
                 groups.forEach(({ g, items, flavors }) => {
                     if (groups.length > 1) {
                         const sub = document.createElement('div');
@@ -1326,7 +1357,7 @@
                         card.className = 'product-card flavor-card' + (chosen ? ' selected' : '');
                         card.innerHTML = `
                             <div class="product-name">${esc(s.name)}</div>
-                            <div class="flavor-sub">${chosen ? `${esc(picked.item.name)}・NT$${picked.item.price.toLocaleString()}` : `${s.items.length} 種兩數`}</div>
+                            <div class="flavor-sub">${chosen ? `${esc(picked.item.name)}・NT$${boxPrice(picked.item).toLocaleString()}` : `${s.items.length} 種兩數`}</div>
                         `;
                         card.onclick = () => openBoxWeights(si, g, s);
                         grid.appendChild(card);
@@ -1356,13 +1387,13 @@
             const gross = done ? boxGross(fixed) : 0;
             document.getElementById('boxSum').innerHTML = done
                 ? `<div><span>${labels.map(esc).join(' ＋ ')}</span><span>NT$${gross.toLocaleString()}</span></div>
-                   <div class="off"><span>${box.name}折扣</span><span>-NT$${box.off}</span></div>
+                   ${box.off ? `<div class="off"><span>${box.name}折扣</span><span>-NT$${box.off}</span></div>` : ''}
                    <div class="total"><span>禮盒價</span><span>NT$${(gross - box.off).toLocaleString()}</span></div>`
                 : `<div>請選擇${box.slots.map(s => s.title).join('和')}</div>`;
         }
 
         // 禮盒原價：選的品項＋固定附的商品
-        const boxGross = (fixed) => boxPick.reduce((s, p) => s + p.item.price, 0)
+        const boxGross = (fixed) => boxPick.reduce((s, p) => s + boxPrice(p.item), 0)
             + fixed.reduce((s, f) => s + f.item.price * f.qty, 0);
 
         // 整片口味 → 跳出視窗選兩數
@@ -1929,7 +1960,7 @@
                     <div class="cart-item">
                         <div class="cart-item-info">
                             <div class="cart-item-name">${item.series && item.series !== item.name ? esc(item.series) + ' ' : ''}${esc(item.name)}</div>
-                            <div class="cart-item-qty">NT$${item.price} × ${item.qty}${item.box ? `<br>原價 NT$${item.gross.toLocaleString()}，每盒折 ${item.off}` : ''}</div>
+                            <div class="cart-item-qty">NT$${item.price} × ${item.qty}${item.box && item.off ? `<br>原價 NT$${item.gross.toLocaleString()}，每盒折 ${item.off}` : ''}</div>
                         </div>
                         <div style="display: flex; gap: 5px; align-items: center;">
                             <div class="qty-stepper">
