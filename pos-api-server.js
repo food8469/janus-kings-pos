@@ -56,12 +56,15 @@ const PAYMENT_METHODS = ['現金', 'LINE Pay', '信用卡'];
 // 禮盒：選項一、選項二各選一個商品（可同一個），價格 = 兩個相加，每盒自動折 off 元；賣出時扣兩個商品的庫存
 // slots：每個選項可以選的商品群組；群組用系列（可限定品名）或大分類（整片：口味再選兩數）指定
 // prefix：報表名稱前面加的字，避免跟經典款同名（例：頂規竹鹽）
+// fixed：禮盒固定附的商品（不用選，用系列＋品名找；也算進價格、扣庫存）
 // （前台 pos-checkout.html 的 BOXES 要跟這裡一致）
 const CLASSIC_ROUND = { series: '經典一口吃', names: ['鹽味', '紅酒', '味噌', '花雕', '香辣'] };
 const ROUNDS = [CLASSIC_ROUND, { series: '頂規一口吃', prefix: '頂規' }, { series: '混搭款' }];
+const SQUARES = [{ category: '整片系列' }, { category: '頂規整片', prefix: '頂規' }];
 const BOXES = {
   double: { name: '雙圓禮盒', off: 280, slots: [ROUNDS, ROUNDS] },
-  squareRound: { name: '方圓禮盒', off: 180, slots: [[{ category: '整片系列' }, { category: '頂規整片', prefix: '頂規' }], ROUNDS] },
+  squareRound: { name: '方圓禮盒', off: 180, slots: [SQUARES, ROUNDS] },
+  trio: { name: '三品禮盒', off: 90, slots: [SQUARES, ROUNDS], fixed: [{ series: '牛奶糖', name: '6入' }] },
 };
 // 商品屬於這個選項的哪個群組（不屬於就是 undefined）
 const boxGroup = (slot, p) => slot.find(g => (g.category ? p.category === g.category
@@ -573,14 +576,26 @@ app.post('/api/sales/create', requireDevice, async (req, res) => {
   if (!storeKey) return res.status(400).json({ status: 'error', message: '門市錯誤' });
   if (!staff) return res.status(400).json({ status: 'error', message: '請選擇銷售人員' });
   if (isBox && !box) return res.status(400).json({ status: 'error', message: '禮盒種類錯誤，請重新整理頁面' });
-  if (isBox && ids.length !== 2) return res.status(400).json({ status: 'error', message: `${box.name}要選兩個品項` });
+  if (isBox && ids.length !== box.slots.length) return res.status(400).json({ status: 'error', message: `${box.name}要選 ${box.slots.length} 個品項` });
   if (!ids.every(Number.isInteger)) return res.status(404).json({ status: 'error', message: '商品不存在' });
 
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const { rows } = await client.query('SELECT * FROM products WHERE id = ANY($1) FOR UPDATE', [ids]);
-    const parts = ids.map(id => rows.find(p => p.id === id));
+    // 禮盒固定附的商品（例：三品禮盒的牛奶糖）接在選的品項後面
+    const fixedIds = [];
+    for (const f of (box && box.fixed) || []) {
+      const { rows: [p] } = await client.query(
+        'SELECT id FROM products WHERE series = $1 AND name = $2 AND active ORDER BY id LIMIT 1', [f.series, f.name]);
+      if (!p) {
+        await client.query('ROLLBACK');
+        return res.status(400).json({ status: 'error', message: `${f.series} ${f.name} 已下架，${box.name}暫時不能賣` });
+      }
+      fixedIds.push(p.id);
+    }
+    const allIds = [...ids, ...fixedIds];
+    const { rows } = await client.query('SELECT * FROM products WHERE id = ANY($1) FOR UPDATE', [allIds]);
+    const parts = allIds.map(id => rows.find(p => p.id === id));
     if (parts.some(p => !p)) {
       await client.query('ROLLBACK');
       return res.status(404).json({ status: 'error', message: '商品不存在' });
@@ -590,13 +605,13 @@ app.post('/api/sales/create', requireDevice, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(400).json({ status: 'error', message: `${inactive.name} 已下架，請重新整理頁面` });
     }
-    const groups = isBox ? parts.map((p, i) => boxGroup(box.slots[i], p)) : [];
+    const groups = isBox ? parts.slice(0, ids.length).map((p, i) => boxGroup(box.slots[i], p)) : [];
     if (groups.some(g => !g)) {
       await client.query('ROLLBACK');
       return res.status(400).json({ status: 'error', message: `${box.name}品項錯誤，請重新整理頁面` });
     }
 
-    // 單價：一般商品是售價；禮盒是兩個商品相加，每盒再折 box.off（記在折扣欄）
+    // 單價：一般商品是售價；禮盒是裡面的商品全部相加，每盒再折 box.off（記在折扣欄）
     const price = parts.reduce((s, p) => s + p.price, 0);
     const boxOff = isBox ? box.off * qty : 0;
     // 庫存不足仍可結帳（庫存會變負數，後台看得到），避免庫存沒登錄時店裡無法賣東西
@@ -618,13 +633,14 @@ app.post('/api/sales/create', requireDevice, async (req, res) => {
                           payment_method, tax_id, bundle)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
       [isBox ? 0 : parts[0].id,
-       isBox ? `${box.name}（${parts.map((p, i) => boxPartLabel(groups[i], p)).join('＋')}）` : productLabel(parts[0]),
+       isBox ? `${box.name}（${parts.map((p, i) => (groups[i] ? boxPartLabel(groups[i], p) : `${p.series} ${p.name}`)).join('＋')}）`
+             : productLabel(parts[0]),
        price, qty, price * qty - boxOff - lineDiscount,
        store, staff, (customer_name || '').trim() || '客人', String(order_no || '').slice(0, 40) || null, boxOff + lineDiscount,
        toInt(req.body?.customer_id, '顧客'),
        PAYMENT_METHODS.includes(req.body?.payment_method) ? req.body.payment_method : null,
        /^\d{8}$/.test(String(req.body?.tax_id || '')) ? String(req.body.tax_id) : null,
-       isBox ? JSON.stringify({ type: bundleReq.type, items: ids, off: box.off }) : null]
+       isBox ? JSON.stringify({ type: bundleReq.type, items: allIds, off: box.off }) : null]
     );
     await client.query('COMMIT');
 

@@ -1182,13 +1182,16 @@
         // （後端 pos-api-server.js 的 BOXES 要跟這裡一致）
         const CLASSIC_ROUND = { label: '經典一口吃', series: '經典一口吃', names: ['鹽味', '紅酒', '味噌', '花雕', '香辣'] };
         const ROUNDS = [CLASSIC_ROUND, { label: '頂規一口吃', series: '頂規一口吃', prefix: '頂規' }, { label: '混搭款', series: '混搭款' }];
+        const SQUARES = [{ label: '整片系列', category: '整片系列' }, { label: '頂規整片', category: '頂規整片', prefix: '頂規' }];
         const BOXES = {
             double: { name: '雙圓禮盒', off: 280,
                       slots: [{ title: '選項一', groups: ROUNDS }, { title: '選項二', groups: ROUNDS }] },
             squareRound: { name: '方圓禮盒', off: 180,
-                           slots: [{ title: '選項一・方', groups: [{ label: '整片系列', category: '整片系列' },
-                                                                   { label: '頂規整片', category: '頂規整片', prefix: '頂規' }] },
-                                   { title: '選項二・圓', groups: ROUNDS }] },
+                           slots: [{ title: '選項一・方', groups: SQUARES }, { title: '選項二・圓', groups: ROUNDS }] },
+            // fixed：固定附的商品（不用選，用系列＋品名找；也算進價格、扣庫存）。找不到（下架）就不顯示這個禮盒
+            trio: { name: '三品禮盒', off: 90,
+                    slots: [{ title: '選項一・方', groups: SQUARES }, { title: '選項二・圓', groups: ROUNDS }],
+                    fixed: [{ series: '牛奶糖', name: '6入' }] },
         };
         // 「全部」畫面裡，禮盒卡片放在這個分類卡後面
         const BOX_TILES_AFTER = '頂規整片';
@@ -1205,7 +1208,15 @@
             }).filter(x => (x.flavors || x.items).length);
         }
 
-        const boxAvailable = (type) => BOXES[type].slots.every(slot => slotGroups(slot).length);
+        // 禮盒固定附的商品（上架中的）；有一個找不到就回傳 null
+        function boxFixedItems(type) {
+            const items = (BOXES[type].fixed || []).map(f =>
+                seriesData.filter(s => s.name === f.series).flatMap(s => s.items).find(i => i.name === f.name));
+            return items.every(Boolean) ? items : null;
+        }
+        const fixedLabel = (item) => `${item.series} ${item.name}`;
+
+        const boxAvailable = (type) => BOXES[type].slots.every(slot => slotGroups(slot).length) && !!boxFixedItems(type);
         // 禮盒裡品項的名稱：一口吃是品名；整片是「口味 兩數」
         const boxPartLabel = ({ item, group }) =>
             (group.prefix || '') + (group.category && item.name !== item.series ? `${item.series} ${item.name}` : item.name);
@@ -1222,7 +1233,7 @@
         // 購物車裡某個商品總共要用掉幾個（單買 + 禮盒裡的）
         function cartUse(id) {
             return Object.values(cart).reduce((n, c) =>
-                n + (c.box ? c.box.items.filter(b => b === id).length * c.qty : c.id === id ? c.qty : 0), 0);
+                n + (c.box ? c.parts.filter(b => b === id).length * c.qty : c.id === id ? c.qty : 0), 0);
         }
 
         function stockLeft(item) {
@@ -1306,11 +1317,29 @@
                 });
             });
 
+            // 固定附的商品（例：三品禮盒的牛奶糖）：不用選，顯示價格和庫存
+            const fixed = boxFixedItems(boxType) || [];
+            if (fixed.length) {
+                const head = document.createElement('div');
+                head.className = 'box-title';
+                head.textContent = '已包含';
+                const grid = document.createElement('div');
+                grid.className = 'box-flavors';
+                fixed.forEach(item => {
+                    const card = boxItemCard(item, fixedLabel(item), true, null);
+                    card.style.cursor = 'default';
+                    grid.appendChild(card);
+                });
+                options.append(head, grid);
+            }
+
             const [a, b] = boxPick;
+            const labels = a && b ? [boxPartLabel(a), boxPartLabel(b), ...fixed.map(fixedLabel)] : [];
+            const gross = a && b ? a.item.price + b.item.price + fixed.reduce((s, i) => s + i.price, 0) : 0;
             document.getElementById('boxSum').innerHTML = a && b
-                ? `<div><span>${esc(boxPartLabel(a))} ＋ ${esc(boxPartLabel(b))}</span><span>NT$${(a.item.price + b.item.price).toLocaleString()}</span></div>
+                ? `<div><span>${labels.map(esc).join(' ＋ ')}</span><span>NT$${gross.toLocaleString()}</span></div>
                    <div class="off"><span>${box.name}折扣</span><span>-NT$${box.off}</span></div>
-                   <div class="total"><span>禮盒價</span><span>NT$${(a.item.price + b.item.price - box.off).toLocaleString()}</span></div>`
+                   <div class="total"><span>禮盒價</span><span>NT$${(gross - box.off).toLocaleString()}</span></div>`
                 : '<div>請選擇選項一和選項二</div>';
         }
 
@@ -1337,12 +1366,20 @@
                     `<div class="message error">請先選擇${box.slots[!a ? 0 : 1].title}</div>`;
                 return;
             }
+            const fixed = boxFixedItems(boxType);
+            if (!fixed) {
+                document.getElementById('boxMessage').innerHTML =
+                    `<div class="message error">${box.name}的固定商品已下架，請重新整理頁面</div>`;
+                return;
+            }
             // 同樣的組合合併成一行，數量 +1
+            // box.items 是選的品項（送給後端）；parts 是實際用到的全部商品（含固定附的，算庫存用）
             const key = `box-${boxType}-${a.item.id}-${b.item.id}`;
             if (!cart[key]) {
-                const gross = a.item.price + b.item.price;
-                cart[key] = { id: key, box: { type: boxType, items: [a.item.id, b.item.id] }, off: box.off,
-                              name: `${box.name}（${boxPartLabel(a)}＋${boxPartLabel(b)}）`, series: '',
+                const gross = a.item.price + b.item.price + fixed.reduce((s, i) => s + i.price, 0);
+                cart[key] = { id: key, box: { type: boxType, items: [a.item.id, b.item.id] },
+                              parts: [a.item.id, b.item.id, ...fixed.map(i => i.id)], off: box.off,
+                              name: `${box.name}（${[boxPartLabel(a), boxPartLabel(b), ...fixed.map(fixedLabel)].join('＋')}）`, series: '',
                               gross, price: gross - box.off, qty: 0 };
             }
             cart[key].qty += 1;
