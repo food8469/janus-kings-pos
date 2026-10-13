@@ -53,10 +53,22 @@ const STORE_KEYS = { '高雄': 'gaoxiong', '台中': 'taizhong' };
 const productLabel = (p) => (!p.name || p.series === p.name ? p.series : `${p.series}-${p.name}`);
 const PAYMENT_METHODS = ['現金', 'LINE Pay', '信用卡'];
 
-// 雙圓禮盒：任選兩個經典一口吃（可同口味），價格 = 兩個相加，每盒自動折 off 元；賣出時扣兩個口味的庫存
-// （前台 pos-checkout.html 的 BOX 要跟這裡一致）
-const BOX = { name: '雙圓禮盒', series: '經典一口吃', flavors: ['鹽味', '紅酒', '味噌', '花雕', '香辣'], off: 280 };
-// 一筆銷售實際扣庫存的商品：禮盒是組成的兩個口味，其他就是商品本身
+// 禮盒：選項一、選項二各選一個商品（可同一個），價格 = 兩個相加，每盒自動折 off 元；賣出時扣兩個商品的庫存
+// slots：每個選項可以選的商品群組；群組用系列（可限定品名）或大分類（整片：口味再選兩數）指定
+// prefix：報表名稱前面加的字，避免跟經典款同名（例：頂規竹鹽）
+// （前台 pos-checkout.html 的 BOXES 要跟這裡一致）
+const CLASSIC_ROUND = { series: '經典一口吃', names: ['鹽味', '紅酒', '味噌', '花雕', '香辣'] };
+const ROUNDS = [CLASSIC_ROUND, { series: '頂規一口吃', prefix: '頂規' }, { series: '混搭款' }];
+const BOXES = {
+  double: { name: '雙圓禮盒', off: 280, slots: [ROUNDS, ROUNDS] },
+  squareRound: { name: '方圓禮盒', off: 180, slots: [[{ category: '整片系列' }, { category: '頂規整片', prefix: '頂規' }], ROUNDS] },
+};
+// 商品屬於這個選項的哪個群組（不屬於就是 undefined）
+const boxGroup = (slot, p) => slot.find(g => (g.category ? p.category === g.category
+  : p.series === g.series && (!g.names || g.names.includes(p.name))));
+// 禮盒裡每個商品的名稱：一口吃是品名；整片是「口味 兩數」
+const boxPartLabel = (g, p) => (g.prefix || '') + (g.category && p.name !== p.series ? `${p.series} ${p.name}` : p.name);
+// 一筆銷售實際扣庫存的商品：禮盒是組成的兩個商品，其他就是商品本身
 const saleParts = (sale) => (sale.bundle ? sale.bundle.items : [sale.product_id]);
 const STORES = ['高雄', '台中'];
 // 門市顯示名稱（資料裡還是「高雄」「台中」，訊息裡高雄顯示成總部）
@@ -555,14 +567,18 @@ app.post('/api/sales/create', requireDevice, async (req, res) => {
   const store = req.device ? req.device.store : req.body?.store;
   const qty = parseInt(quantity, 10);
   const storeKey = STORE_KEYS[store];
-  // 雙圓禮盒：box = [口味商品 id, 口味商品 id]
-  const isBox = req.body?.box !== undefined;
-  const ids = isBox ? (Array.isArray(req.body.box) ? req.body.box.map(Number) : []) : [Number(product_id)];
+  // 禮盒：bundle = { type: 'double' | 'squareRound', items: [商品 id, 商品 id] }
+  // （舊版前台送 box = [id, id]，當作雙圓禮盒）
+  const bundleReq = req.body?.bundle ?? (req.body?.box !== undefined ? { type: 'double', items: req.body.box } : null);
+  const isBox = !!bundleReq;
+  const box = isBox && Object.hasOwn(BOXES, String(bundleReq.type)) ? BOXES[bundleReq.type] : null;
+  const ids = isBox ? (Array.isArray(bundleReq.items) ? bundleReq.items.map(Number) : []) : [Number(product_id)];
 
   if (!qty || qty <= 0) return res.status(400).json({ status: 'error', message: '數量錯誤' });
   if (!storeKey) return res.status(400).json({ status: 'error', message: '門市錯誤' });
   if (!staff) return res.status(400).json({ status: 'error', message: '請選擇銷售人員' });
-  if (isBox && ids.length !== 2) return res.status(400).json({ status: 'error', message: `${BOX.name}要選兩個口味` });
+  if (isBox && !box) return res.status(400).json({ status: 'error', message: '禮盒種類錯誤，請重新整理頁面' });
+  if (isBox && ids.length !== 2) return res.status(400).json({ status: 'error', message: `${box.name}要選兩個品項` });
   if (!ids.every(Number.isInteger)) return res.status(404).json({ status: 'error', message: '商品不存在' });
 
   const client = await pool.connect();
@@ -579,14 +595,15 @@ app.post('/api/sales/create', requireDevice, async (req, res) => {
       await client.query('ROLLBACK');
       return res.status(400).json({ status: 'error', message: `${inactive.name} 已下架，請重新整理頁面` });
     }
-    if (isBox && parts.some(p => p.series !== BOX.series || !BOX.flavors.includes(p.name))) {
+    const groups = isBox ? parts.map((p, i) => boxGroup(box.slots[i], p)) : [];
+    if (groups.some(g => !g)) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ status: 'error', message: `${BOX.name}口味錯誤，請重新整理頁面` });
+      return res.status(400).json({ status: 'error', message: `${box.name}品項錯誤，請重新整理頁面` });
     }
 
-    // 單價：一般商品是售價；禮盒是兩個口味相加，每盒再折 BOX.off（記在折扣欄）
+    // 單價：一般商品是售價；禮盒是兩個商品相加，每盒再折 box.off（記在折扣欄）
     const price = parts.reduce((s, p) => s + p.price, 0);
-    const boxOff = isBox ? BOX.off * qty : 0;
+    const boxOff = isBox ? box.off * qty : 0;
     // 庫存不足仍可結帳（庫存會變負數，後台看得到），避免庫存沒登錄時店裡無法賣東西
     // 整單折扣分到這個品項的金額（不能超過這項的金額）
     const lineDiscount = toInt(req.body?.discount, '折扣') ?? 0;
@@ -606,13 +623,13 @@ app.post('/api/sales/create', requireDevice, async (req, res) => {
                           payment_method, tax_id, bundle)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14) RETURNING *`,
       [isBox ? 0 : parts[0].id,
-       isBox ? `${BOX.name}（${parts.map(p => p.name).join('＋')}）` : productLabel(parts[0]),
+       isBox ? `${box.name}（${parts.map((p, i) => boxPartLabel(groups[i], p)).join('＋')}）` : productLabel(parts[0]),
        price, qty, price * qty - boxOff - lineDiscount,
        store, staff, (customer_name || '').trim() || '客人', String(order_no || '').slice(0, 40) || null, boxOff + lineDiscount,
        toInt(req.body?.customer_id, '顧客'),
        PAYMENT_METHODS.includes(req.body?.payment_method) ? req.body.payment_method : null,
        /^\d{8}$/.test(String(req.body?.tax_id || '')) ? String(req.body.tax_id) : null,
-       isBox ? JSON.stringify({ items: ids, off: BOX.off }) : null]
+       isBox ? JSON.stringify({ type: bundleReq.type, items: ids, off: box.off }) : null]
     );
     await client.query('COMMIT');
 

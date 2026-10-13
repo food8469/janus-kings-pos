@@ -249,8 +249,11 @@
         .modal-card label { display: block; font-size: 13px; color: #555; margin: 10px 0 4px; }
         .modal-card input { padding: 11px; font-size: 15px; }
         .hint-text { font-size: 12px; color: #999; margin-top: 8px; }
-        /* ===== 雙圓禮盒：選項一、選項二各選一個口味 ===== */
+        /* ===== 禮盒（雙圓、方圓）：選項一、選項二各選一個品項 ===== */
         .box-title { font-weight: bold; margin: 12px 0 8px; }
+        .box-group { font-size: 13px; color: #888; margin: 10px 0 6px; }
+        .box-flavors .flavor-sub { font-size: 12px; color: #888; }
+        .box-flavors .selected .flavor-sub { color: #667eea; font-weight: bold; }
         .box-flavors { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); gap: 8px; }
         .box-flavors .product-card { padding: 10px 4px; }
         .box-flavors .product-name { margin: 0 0 4px; font-size: 15px; }
@@ -537,17 +540,28 @@
         </div>
     </div>
 
-    <!-- 雙圓禮盒：選項一、選項二各選一個經典一口吃口味 -->
+    <!-- 禮盒（雙圓、方圓）：選項一、選項二各選一個品項 -->
     <div id="boxModal" class="modal-overlay" hidden onclick="if (event.target === this) closeBoxModal()">
         <div class="modal-card" style="max-width: 560px;">
             <div class="modal-head">
-                <h3>雙圓禮盒</h3>
+                <h3 id="boxTitle"></h3>
                 <button class="icon-btn" onclick="closeBoxModal()">✕</button>
             </div>
             <div id="boxOptions"></div>
             <div id="boxSum" class="box-sum"></div>
             <button class="checkout-btn" onclick="addBoxToCart()">加入購物車</button>
             <div id="boxMessage"></div>
+        </div>
+    </div>
+
+    <!-- 禮盒裡選整片：點口味後跳出來選兩數 -->
+    <div id="boxWeightModal" class="modal-overlay" hidden onclick="if (event.target === this) closeBoxWeights()">
+        <div class="modal-card">
+            <div class="modal-head">
+                <h3 id="boxWeightTitle"></h3>
+                <button class="icon-btn" onclick="closeBoxWeights()">✕</button>
+            </div>
+            <div id="boxWeights" class="product-grid" style="grid-template-columns: repeat(2, 1fr); gap: 10px;"></div>
         </div>
     </div>
 
@@ -1107,17 +1121,20 @@
             const groups = [...new Set(catOrder.map(groupOf))];
             // 「全部」不分區，所有卡片放在同一個畫面；其他分類有好幾區時才加小標題
             const showHeadings = currentCategory !== ALL_TAB && groups.length > 1;
-            // 雙圓禮盒卡片：「全部」放在頂規整片後面；「一口吃」分類（或沒有頂規整片時）放在經典一口吃後面
-            const boxTile = () => makeTile(tileUrl(`series:一口吃|${BOX.name}`) || `${API_URL()}/${BOX.image}`, BOX.name,
-                `任選兩個・每盒折 ${BOX.off}`, openBoxModal);
-            const boxAfterDrill = currentCategory === ALL_TAB && catOrder.includes(BOX.afterAll);
+            // 禮盒卡片（雙圓、方圓）：「全部」放在頂規整片後面；「一口吃」分類（或沒有頂規整片時）放在經典一口吃後面
+            const addBoxTiles = () => Object.entries(BOXES).forEach(([type, box]) => {
+                if (!boxAvailable(type)) return;
+                seriesView.appendChild(makeTile(tileUrl(`series:一口吃|${box.name}`) || (box.image && `${API_URL()}/${box.image}`),
+                    box.name, `任選兩個・每盒折 ${box.off}`, () => openBoxModal(type)));
+            });
+            const boxAfterDrill = currentCategory === ALL_TAB && catOrder.includes(BOX_TILES_AFTER);
             groups.forEach(group => {
                 if (showHeadings) addHeading(seriesView, group);
                 catOrder.filter(c => groupOf(c) === group).forEach(category => {
                     const ofCategory = list.filter(s => s.category === category);
                     if (DRILL_CATEGORIES.includes(category)) {
                         seriesView.appendChild(makeTile(tileUrl(`cat:${category}`), category, `${ofCategory.length} 種口味`, () => openDrill(category)));
-                        if (boxAfterDrill && category === BOX.afterAll && boxFlavors().length) seriesView.appendChild(boxTile());
+                        if (boxAfterDrill && category === BOX_TILES_AFTER) addBoxTiles();
                     } else if (SINGLE_TILE_CATEGORIES.includes(category)) {
                         const merged = mergedSeries(category);
                         seriesView.appendChild(makeTile(tileUrl(`cat:${category}`), category,
@@ -1125,7 +1142,7 @@
                     } else {
                         ofCategory.forEach(s => {
                             seriesView.appendChild(seriesTile(s));
-                            if (!boxAfterDrill && s.name === BOX.series && boxFlavors().length) seriesView.appendChild(boxTile());
+                            if (!boxAfterDrill && s.name === CLASSIC_ROUND.series) addBoxTiles();
                         });
                     }
                 });
@@ -1158,28 +1175,79 @@
         }
         const tabOf = (category) => MERGED_TABS[category] || category;
 
-        // ---- 雙圓禮盒：選項一、選項二各選一個經典一口吃（可同口味），價格兩個相加，每盒自動折 off 元 ----
-        // （後端 pos-api-server.js 的 BOX 要跟這裡一致）
-        // afterAll：「全部」畫面裡，禮盒卡片放在這個分類卡後面；
+        // ---- 禮盒（雙圓、方圓）：選項一、選項二各選一個品項（可同一個），價格兩個相加，每盒自動折 off 元 ----
+        // slots：每個選項的商品群組。群組用系列（names 可限定品名、照這個順序）或大分類（整片：點口味再選兩數）指定
+        // prefix：品項名稱前面加的字，避免跟經典款同名（例：頂規竹鹽）
         // image：卡片圖片（跟程式放在一起上傳）。瀏覽器會快取很久，換圖片時要把 v= 加 1
-        const BOX = { name: '雙圓禮盒', series: '經典一口吃', flavors: ['鹽味', '紅酒', '味噌', '花雕', '香辣'], off: 280,
-                      afterAll: '頂規整片', image: 'tile-gift-box.jpg?v=1' };
-        let boxPick = [null, null];   // 選項一、選項二選的品項
+        // （後端 pos-api-server.js 的 BOXES 要跟這裡一致）
+        const CLASSIC_ROUND = { label: '經典一口吃', series: '經典一口吃', names: ['鹽味', '紅酒', '味噌', '花雕', '香辣'] };
+        const ROUNDS = [CLASSIC_ROUND, { label: '頂規一口吃', series: '頂規一口吃', prefix: '頂規' }, { label: '混搭款', series: '混搭款' }];
+        const BOXES = {
+            double: { name: '雙圓禮盒', off: 280, image: 'tile-gift-box.jpg?v=1',
+                      slots: [{ title: '選項一', groups: ROUNDS }, { title: '選項二', groups: ROUNDS }] },
+            squareRound: { name: '方圓禮盒', off: 180,
+                           slots: [{ title: '選項一・方', groups: [{ label: '整片系列', category: '整片系列' },
+                                                                   { label: '頂規整片', category: '頂規整片', prefix: '頂規' }] },
+                                   { title: '選項二・圓', groups: ROUNDS }] },
+        };
+        // 「全部」畫面裡，禮盒卡片放在這個分類卡後面
+        const BOX_TILES_AFTER = '頂規整片';
 
-        // 可以選的口味（上架中的），照 BOX.flavors 的順序
-        function boxFlavors() {
-            const items = seriesData.filter(s => s.name === BOX.series).flatMap(s => s.items);
-            return BOX.flavors.map(f => items.find(i => i.name === f)).filter(Boolean);
+        let boxType = null;             // 目前打開的禮盒
+        let boxPick = [null, null];     // 選項一、選項二選的 { item, group }
+
+        // 一個選項可以選的東西（只有上架中的）：一般群組是 items；整片群組是 flavors（口味 → 各兩數）
+        function slotGroups(slot) {
+            return slot.groups.map(g => {
+                if (g.category) return { g, flavors: seriesData.filter(s => s.category === g.category) };
+                const items = seriesData.filter(s => s.name === g.series).flatMap(s => s.items);
+                return { g, items: g.names ? g.names.map(n => items.find(i => i.name === n)).filter(Boolean) : items };
+            }).filter(x => (x.flavors || x.items).length);
+        }
+
+        const boxAvailable = (type) => BOXES[type].slots.every(slot => slotGroups(slot).length);
+        // 禮盒裡品項的名稱：一口吃是品名；整片是「口味 兩數」
+        const boxPartLabel = ({ item, group }) =>
+            (group.prefix || '') + (group.category && item.name !== item.series ? `${item.series} ${item.name}` : item.name);
+
+        // 在選項裡找這個商品（拿最新的價格、庫存；下架了就找不到）
+        function findInSlot(slot, id) {
+            for (const { g, items, flavors } of slotGroups(slot)) {
+                const item = (items || flavors.flatMap(s => s.items)).find(i => i.id === id);
+                if (item) return { item, group: g };
+            }
+            return null;
         }
 
         // 購物車裡某個商品總共要用掉幾個（單買 + 禮盒裡的）
         function cartUse(id) {
             return Object.values(cart).reduce((n, c) =>
-                n + (c.box ? c.box.filter(b => b === id).length * c.qty : c.id === id ? c.qty : 0), 0);
+                n + (c.box ? c.box.items.filter(b => b === id).length * c.qty : c.id === id ? c.qty : 0), 0);
         }
 
-        function openBoxModal() {
+        function stockLeft(item) {
+            const store = document.getElementById('store').value;
+            return (store === '高雄' ? item.gaoxiong : item.taizhong) - cartUse(item.id);
+        }
+
+        // 品項卡（禮盒視窗用）：名稱、價格、扣掉購物車後的庫存
+        function boxItemCard(item, title, selected, onclick) {
+            const left = stockLeft(item);
+            const card = document.createElement('div');
+            card.className = 'product-card' + (selected ? ' selected' : '');
+            card.innerHTML = `
+                <div class="product-name">${esc(title)}</div>
+                <div class="product-price">NT$${item.price.toLocaleString()}</div>
+                <div class="product-stock ${left <= 0 ? 'out' : left <= 5 ? 'low' : ''}">庫存 ${left}</div>
+            `;
+            card.onclick = onclick;
+            return card;
+        }
+
+        function openBoxModal(type) {
+            boxType = type;
             boxPick = [null, null];
+            document.getElementById('boxTitle').textContent = BOXES[type].name;
             document.getElementById('boxMessage').innerHTML = '';
             renderBoxModal();
             document.getElementById('boxModal').hidden = false;
@@ -1187,62 +1255,95 @@
         }
 
         function closeBoxModal() {
+            closeBoxWeights();
             document.getElementById('boxModal').hidden = true;
         }
 
+        function pickBox(slotIndex, item, group) {
+            boxPick[slotIndex] = { item, group };
+            document.getElementById('boxMessage').innerHTML = '';
+            closeBoxWeights();
+            renderBoxModal();
+        }
+
         function renderBoxModal() {
-            const flavors = boxFlavors();
-            // 口味被下架了就取消選擇；價格、庫存換成最新的
-            boxPick = boxPick.map(p => p && flavors.find(f => f.id === p.id) || null);
-            const store = document.getElementById('store').value;
+            const box = BOXES[boxType];
+            // 品項被下架了就取消選擇；價格、庫存換成最新的
+            boxPick = boxPick.map((p, i) => p && findInSlot(box.slots[i], p.item.id));
             const options = document.getElementById('boxOptions');
             options.innerHTML = '';
-            ['選項一', '選項二'].forEach((title, slot) => {
+            box.slots.forEach((slot, si) => {
                 const head = document.createElement('div');
                 head.className = 'box-title';
-                head.textContent = title;
-                const grid = document.createElement('div');
-                grid.className = 'box-flavors';
-                flavors.forEach(f => {
-                    const stock = store === '高雄' ? f.gaoxiong : f.taizhong;
-                    const left = stock - cartUse(f.id);
-                    const card = document.createElement('div');
-                    card.className = 'product-card' + (boxPick[slot] && boxPick[slot].id === f.id ? ' selected' : '');
-                    card.innerHTML = `
-                        <div class="product-name">${esc(f.name)}</div>
-                        <div class="product-price">NT$${f.price.toLocaleString()}</div>
-                        <div class="product-stock ${left <= 0 ? 'out' : left <= 5 ? 'low' : ''}">庫存 ${left}</div>
-                    `;
-                    card.onclick = () => {
-                        boxPick[slot] = f;
-                        document.getElementById('boxMessage').innerHTML = '';
-                        renderBoxModal();
-                    };
-                    grid.appendChild(card);
+                head.textContent = slot.title;
+                options.appendChild(head);
+                const groups = slotGroups(slot);
+                const picked = boxPick[si];
+                groups.forEach(({ g, items, flavors }) => {
+                    if (groups.length > 1) {
+                        const sub = document.createElement('div');
+                        sub.className = 'box-group';
+                        sub.textContent = g.label;
+                        options.appendChild(sub);
+                    }
+                    const grid = document.createElement('div');
+                    grid.className = 'box-flavors';
+                    (items || []).forEach(item => grid.appendChild(boxItemCard(item, item.name,
+                        picked && picked.item.id === item.id, () => pickBox(si, item, g))));
+                    // 整片：口味卡，點了跳出兩數；選好的口味顯示兩數和價格
+                    (flavors || []).forEach(s => {
+                        const chosen = picked && picked.group === g && s.items.some(i => i.id === picked.item.id);
+                        const card = document.createElement('div');
+                        card.className = 'product-card flavor-card' + (chosen ? ' selected' : '');
+                        card.innerHTML = `
+                            <div class="product-name">${esc(s.name)}</div>
+                            <div class="flavor-sub">${chosen ? `${esc(picked.item.name)}・NT$${picked.item.price.toLocaleString()}` : `${s.items.length} 種兩數`}</div>
+                        `;
+                        card.onclick = () => openBoxWeights(si, g, s);
+                        grid.appendChild(card);
+                    });
+                    options.appendChild(grid);
                 });
-                options.append(head, grid);
             });
 
             const [a, b] = boxPick;
             document.getElementById('boxSum').innerHTML = a && b
-                ? `<div><span>${esc(a.name)} ＋ ${esc(b.name)}</span><span>NT$${(a.price + b.price).toLocaleString()}</span></div>
-                   <div class="off"><span>${BOX.name}折扣</span><span>-NT$${BOX.off}</span></div>
-                   <div class="total"><span>禮盒價</span><span>NT$${(a.price + b.price - BOX.off).toLocaleString()}</span></div>`
+                ? `<div><span>${esc(boxPartLabel(a))} ＋ ${esc(boxPartLabel(b))}</span><span>NT$${(a.item.price + b.item.price).toLocaleString()}</span></div>
+                   <div class="off"><span>${box.name}折扣</span><span>-NT$${box.off}</span></div>
+                   <div class="total"><span>禮盒價</span><span>NT$${(a.item.price + b.item.price - box.off).toLocaleString()}</span></div>`
                 : '<div>請選擇選項一和選項二</div>';
         }
 
+        // 整片口味 → 跳出視窗選兩數
+        function openBoxWeights(slotIndex, group, series) {
+            document.getElementById('boxWeightTitle').textContent = `${group.label}・${series.name}`;
+            const grid = document.getElementById('boxWeights');
+            grid.innerHTML = '';
+            const picked = boxPick[slotIndex];
+            series.items.forEach(item => grid.appendChild(boxItemCard(item, item.name,
+                picked && picked.item.id === item.id, () => pickBox(slotIndex, item, group))));
+            document.getElementById('boxWeightModal').hidden = false;
+        }
+
+        function closeBoxWeights() {
+            document.getElementById('boxWeightModal').hidden = true;
+        }
+
         function addBoxToCart() {
+            const box = BOXES[boxType];
             const [a, b] = boxPick;
             if (!a || !b) {
                 document.getElementById('boxMessage').innerHTML =
-                    `<div class="message error">請先選擇${!a ? '選項一' : '選項二'}</div>`;
+                    `<div class="message error">請先選擇${box.slots[!a ? 0 : 1].title}</div>`;
                 return;
             }
             // 同樣的組合合併成一行，數量 +1
-            const key = `box-${a.id}-${b.id}`;
+            const key = `box-${boxType}-${a.item.id}-${b.item.id}`;
             if (!cart[key]) {
-                cart[key] = { id: key, box: [a.id, b.id], name: `${BOX.name}（${a.name}＋${b.name}）`, series: '',
-                              gross: a.price + b.price, price: a.price + b.price - BOX.off, qty: 0 };
+                const gross = a.item.price + b.item.price;
+                cart[key] = { id: key, box: { type: boxType, items: [a.item.id, b.item.id] }, off: box.off,
+                              name: `${box.name}（${boxPartLabel(a)}＋${boxPartLabel(b)}）`, series: '',
+                              gross, price: gross - box.off, qty: 0 };
             }
             cart[key].qty += 1;
             renderCart();
@@ -1768,7 +1869,7 @@
                     <div class="cart-item">
                         <div class="cart-item-info">
                             <div class="cart-item-name">${item.series && item.series !== item.name ? esc(item.series) + ' ' : ''}${esc(item.name)}</div>
-                            <div class="cart-item-qty">NT$${item.price} × ${item.qty}${item.box ? `<br>原價 NT$${item.gross.toLocaleString()}，每盒折 ${BOX.off}` : ''}</div>
+                            <div class="cart-item-qty">NT$${item.price} × ${item.qty}${item.box ? `<br>原價 NT$${item.gross.toLocaleString()}，每盒折 ${item.off}` : ''}</div>
                         </div>
                         <div style="display: flex; gap: 5px; align-items: center;">
                             <div class="qty-stepper">
@@ -2146,8 +2247,8 @@
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({
-                            // 雙圓禮盒送兩個口味的 id，後端扣庫存、自動折 BOX.off
-                            ...(item.box ? { box: item.box } : { product_id: parseInt(productId) }),
+                            // 禮盒送種類和兩個品項的 id，後端扣庫存、自動折扣
+                            ...(item.box ? { bundle: item.box } : { product_id: parseInt(productId) }),
                             quantity: item.qty,
                             store: store,
                             staff: staff,
