@@ -968,6 +968,7 @@
         // 商品從後台讀取（在後台「庫存管理」新增、修改、下架）
         let seriesData = [];
         let currentCategory = '';
+        let lastTilesKey = null;   // 上次畫卡片時的內容（見 loadProducts）
 
         async function loadProducts() {
             const seriesView = document.getElementById('seriesView');
@@ -988,7 +989,13 @@
                     }
                     groups[key].items.push({ id: p.id, name: p.name, series: p.series, price: p.price, gaoxiong: p.gaoxiong, taizhong: p.taizhong });
                 });
-                renderSeriesView();
+                // 卡片只顯示名稱、品項數、圖片，不顯示庫存：這些都沒變就不重畫，點卡片抓庫存時畫面才不會閃
+                // （搜尋結果會顯示庫存，搜尋中照樣重畫）
+                const tilesKey = JSON.stringify([seriesData.map(s => [s.category, s.name, s.items.map(i => `${i.id}:${i.name}`)]), tileImages]);
+                if (tilesKey !== lastTilesKey || document.getElementById('productSearch').value.trim()) {
+                    lastTilesKey = tilesKey;
+                    renderSeriesView();
+                }
 
                 // 品項視窗開著的話，換成最新庫存
                 if (currentSeries) {
