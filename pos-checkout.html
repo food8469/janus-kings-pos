@@ -1190,18 +1190,20 @@
         // （後端 pos-api-server.js 的 BOXES 要跟這裡一致）
         const CLASSIC_ROUND = { label: '經典一口吃', series: '經典一口吃', names: ['鹽味', '紅酒', '味噌', '花雕', '香辣'] };
         const ROUNDS = [CLASSIC_ROUND, { label: '頂規一口吃', series: '頂規一口吃', prefix: '頂規' }, { label: '混搭款', series: '混搭款' }];
+        // 方圓、三品、三重奏的「圓」可以選牛奶糖 22入（雙圓禮盒不行）
+        const ROUNDS_PLUS = [...ROUNDS, { label: '牛奶糖', series: '牛奶糖', names: ['22入'], prefix: '牛奶糖 ' }];
         const SQUARES = [{ label: '整片系列', category: '整片系列' }, { label: '頂規整片', category: '頂規整片', prefix: '頂規' }];
         const BOXES = {
             double: { name: '雙圓禮盒', off: 280,
                       slots: [{ title: '選項一', groups: ROUNDS }, { title: '選項二', groups: ROUNDS }] },
             squareRound: { name: '方圓禮盒', off: 180,
-                           slots: [{ title: '選項一・方', groups: SQUARES }, { title: '選項二・圓', groups: ROUNDS }] },
+                           slots: [{ title: '選項一・方', groups: SQUARES }, { title: '選項二・圓', groups: ROUNDS_PLUS }] },
             // fixed：固定附的商品（不用選，用系列＋品名找；qty 是幾個，預設 1；也算進價格、扣庫存）。找不到（下架）就不顯示這個禮盒
             trio: { name: '三品禮盒', off: 90,
-                    slots: [{ title: '選項一・方', groups: SQUARES }, { title: '選項二・圓', groups: ROUNDS }],
+                    slots: [{ title: '選項一・方', groups: SQUARES }, { title: '選項二・圓', groups: ROUNDS_PLUS }],
                     fixed: [{ series: '牛奶糖', name: '6入' }] },
             trioCandy: { name: '三重奏', off: 20,
-                         slots: [{ title: '一口吃', groups: ROUNDS }],
+                         slots: [{ title: '選項', groups: ROUNDS_PLUS }],
                          fixed: [{ series: '牛奶糖', name: '6入', qty: 2 }] },
         };
         // 「全部」畫面裡，禮盒卡片放在這個分類卡後面

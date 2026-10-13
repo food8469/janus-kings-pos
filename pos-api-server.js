@@ -60,12 +60,14 @@ const PAYMENT_METHODS = ['現金', 'LINE Pay', '信用卡'];
 // （前台 pos-checkout.html 的 BOXES 要跟這裡一致）
 const CLASSIC_ROUND = { series: '經典一口吃', names: ['鹽味', '紅酒', '味噌', '花雕', '香辣'] };
 const ROUNDS = [CLASSIC_ROUND, { series: '頂規一口吃', prefix: '頂規' }, { series: '混搭款' }];
+// 方圓、三品、三重奏的「圓」可以選牛奶糖 22入（雙圓禮盒不行）
+const ROUNDS_PLUS = [...ROUNDS, { series: '牛奶糖', names: ['22入'], prefix: '牛奶糖 ' }];
 const SQUARES = [{ category: '整片系列' }, { category: '頂規整片', prefix: '頂規' }];
 const BOXES = {
   double: { name: '雙圓禮盒', off: 280, slots: [ROUNDS, ROUNDS] },
-  squareRound: { name: '方圓禮盒', off: 180, slots: [SQUARES, ROUNDS] },
-  trio: { name: '三品禮盒', off: 90, slots: [SQUARES, ROUNDS], fixed: [{ series: '牛奶糖', name: '6入' }] },
-  trioCandy: { name: '三重奏', off: 20, slots: [ROUNDS], fixed: [{ series: '牛奶糖', name: '6入', qty: 2 }] },
+  squareRound: { name: '方圓禮盒', off: 180, slots: [SQUARES, ROUNDS_PLUS] },
+  trio: { name: '三品禮盒', off: 90, slots: [SQUARES, ROUNDS_PLUS], fixed: [{ series: '牛奶糖', name: '6入' }] },
+  trioCandy: { name: '三重奏', off: 20, slots: [ROUNDS_PLUS], fixed: [{ series: '牛奶糖', name: '6入', qty: 2 }] },
 };
 // 固定附的商品在報表上的名稱（例：牛奶糖 6入×2）
 const fixedPartLabel = (f) => `${f.series} ${f.name}${(f.qty || 1) > 1 ? `×${f.qty}` : ''}`;
