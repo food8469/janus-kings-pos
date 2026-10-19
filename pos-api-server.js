@@ -706,6 +706,7 @@ function toRecord(r) {
     discount: r.discount || 0,
     payment_method: r.payment_method,
     tax_id: r.tax_id,
+    invoice_id: r.invoice_id || null,
     invoice_no: r.invoice_no || null,
     invoice_status: r.invoice_status || null,
   };
@@ -931,6 +932,37 @@ app.post('/api/admin/invoices/retry', requireAdmin, async (req, res) => {
   res.json({ status: 'success', message: `已補開發票 ${again.invoice_no}`, data: again });
 });
 
+// 改開發票（前台結帳紀錄用，要後台密碼）：舊的已開立就先作廢，再用新的類型開一張
+// 最新那張是開立失敗的，就用同一個編號再試（不會多出一筆失敗紀錄）
+app.post('/api/admin/invoices/reissue', requireAdmin, async (req, res) => {
+  if (!invoiceEnabled()) return res.status(400).json({ status: 'error', message: '發票功能未啟用' });
+  const orderNo = String(req.body?.order_no || '').slice(0, 40);
+  const kind = INVOICE_KINDS.includes(req.body?.kind) ? req.body.kind : 'paper';
+  const carrier = String(req.body?.carrier || '').trim().toUpperCase();
+  const taxId = String(req.body?.tax_id || '').trim();
+  if (kind === 'carrier' && !CARRIER_RE.test(carrier)) return res.status(400).json({ status: 'error', message: '手機條碼格式錯誤' });
+  if (kind === 'taxid' && !validTaxId(taxId)) return res.status(400).json({ status: 'error', message: '統一編號不正確' });
+  const { rows: [{ count }] } = await pool.query('SELECT COUNT(*)::int AS count FROM sales WHERE order_no = $1', [orderNo]);
+  if (!count) return res.status(404).json({ status: 'error', message: '找不到這張單' });
+
+  const { rows: [last] } = await pool.query('SELECT * FROM invoices WHERE order_no = $1 ORDER BY id DESC LIMIT 1', [orderNo]);
+  let note = '';
+  if (last && last.status === 'issued') {
+    try {
+      await voidInvoice(last, req.body?.reason || '改開發票');
+    } catch (err) {
+      return res.status(400).json({ status: 'error', message: `舊發票 ${last.invoice_no} 作廢失敗：${err.message}` });
+    }
+    note = `舊發票 ${last.invoice_no} 已作廢，`;
+  }
+  const { rows: [{ n }] } = await pool.query('SELECT COUNT(*)::int AS n FROM invoices WHERE order_no = $1', [orderNo]);
+  const relate = last && last.status === 'failed' ? last.relate_number : (n ? `${orderNo}R${n}` : orderNo);
+  const inv = await issueInvoice(orderNo, { kind, carrier, taxId }, relate);
+  if (inv.skipped) return res.json({ status: 'success', message: `${note}${inv.message}`, data: inv });
+  if (inv.status !== 'issued') return res.status(400).json({ status: 'error', message: `${note}新發票開立失敗：${inv.error || ''}` });
+  res.json({ status: 'success', message: `${note}新發票 ${inv.invoice_no}`, data: inv });
+});
+
 // 後台：作廢發票（交易不動；例如客人要改開統編）
 app.post('/api/admin/invoices/void', requireAdmin, async (req, res) => {
   if (!invoiceEnabled()) return res.status(400).json({ status: 'error', message: '發票功能未啟用' });
@@ -946,7 +978,7 @@ app.post('/api/admin/invoices/void', requireAdmin, async (req, res) => {
 
 // 每筆銷售帶上這張單最新的發票（號碼、狀態）
 const INVOICE_JOIN = `LEFT JOIN LATERAL (
-  SELECT invoice_no, status AS invoice_status FROM invoices WHERE invoices.order_no = sales.order_no ORDER BY id DESC LIMIT 1
+  SELECT id AS invoice_id, invoice_no, status AS invoice_status FROM invoices WHERE invoices.order_no = sales.order_no ORDER BY id DESC LIMIT 1
 ) inv ON TRUE`;
 
 // ============ 顧客 ============

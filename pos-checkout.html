@@ -249,6 +249,12 @@
         .inv-status.ok { background: #ebfbee; color: #2b8a3e; font-weight: bold; }
         .inv-status.bad { background: #fff5f5; color: #c92a2a; font-weight: bold; }
         .inv-status.hint { background: #f4f5f8; color: #888; }
+        .order-invoice { align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+        .order-inv-btns { display: flex; gap: 6px; }
+        .order-inv-btns button { padding: 5px 10px; font-size: 13px; border-radius: 8px; border: 1px solid #667eea; background: white; color: #667eea; cursor: pointer; font-family: inherit; }
+        .order-inv-btns button.danger { border-color: #e03131; color: #e03131; }
+        #riModal .modal-card { display: flex; flex-direction: column; gap: 8px; }
+        #riModal label { margin: 4px 0 0; }
         @keyframes invFlash { from { box-shadow: 0 0 0 4px #2b8a3e; } to { box-shadow: 0 0 0 0 transparent; } }
         .inv-flash { animation: invFlash .9s ease-out; }
         #staffModal { z-index: 1600; }   /* 從付款畫面打開時要蓋在上面 */
@@ -609,6 +615,41 @@
             <div id="boxSum" class="box-sum"></div>
             <button class="checkout-btn" onclick="addBoxToCart()">加入購物車</button>
             <div id="boxMessage"></div>
+        </div>
+    </div>
+
+    <!-- 結帳紀錄：改開／作廢發票（要後台密碼） -->
+    <div id="riModal" class="modal-overlay" hidden onclick="if (event.target === this) closeReissue()">
+        <div class="modal-card">
+            <div class="modal-head">
+                <h3 id="riTitle"></h3>
+                <button class="icon-btn" onclick="closeReissue()">✕</button>
+            </div>
+            <div class="inv-status hint" id="riFrom"></div>
+            <div id="riKindBox">
+                <label>新的發票類型（上下滑動選擇）</label>
+                <div class="inv-wheel-box">
+                    <span class="band"></span>
+                    <div class="inv-wheel" id="riWheel" onscroll="onRiWheelScroll()">
+                        <button data-kind="paper" onclick="setRiKind('paper')"><b>一般</b><small>印紙本</small></button>
+                        <button data-kind="carrier" onclick="setRiKind('carrier')"><b>手機條碼</b><small>不印紙本</small></button>
+                        <button data-kind="taxid" onclick="setRiKind('taxid')"><b>統編</b><small>印紙本</small></button>
+                    </div>
+                </div>
+                <div id="riInputBox" hidden>
+                    <label id="riInputLabel" for="riInput"></label>
+                    <input type="text" id="riInput" autocomplete="off" oninput="checkRiInput()">
+                    <div class="inv-status" id="riStatus" hidden></div>
+                </div>
+            </div>
+            <div id="riVoidBox" hidden>
+                <label for="riReason">作廢原因（20 字以內）</label>
+                <input type="text" id="riReason" maxlength="20" value="客人要求作廢">
+            </div>
+            <label for="riPass">後台密碼（店長確認用）</label>
+            <input type="password" id="riPass" autocomplete="off" placeholder="輸入後台密碼才能執行">
+            <button class="checkout-btn" id="riGo" onclick="submitReissue()"></button>
+            <div id="riMessage"></div>
         </div>
     </div>
 
@@ -2067,7 +2108,7 @@
         const INV_KINDS = ['paper', 'carrier', 'taxid'];
         const INV_NAMES = { paper: ['一般', '印紙本'], carrier: ['手機條碼', '不印紙本'], taxid: ['統編', '印紙本'] };
         const INV_INPUT = {
-            carrier: { label: '手機條碼', placeholder: '直接用掃描槍掃，或手動輸入 /ABC1234', hint: '請掃客人的手機條碼' },
+            carrier: { label: '手機條碼', placeholder: '/ABC1234', hint: '請用掃描槍掃客人的手機條碼，或手動輸入' },
             taxid: { label: '統一編號', placeholder: '8 碼數字', hint: '證明聯會印上統一編號' },
         };
         const CARRIER_RE = /^\/[0-9A-Z.+-]{7}$/;
@@ -2173,21 +2214,24 @@
             toggleInvWheel(false);
         }
 
-        // 掃描槍像鍵盤：很快打完一串再按 Enter。付款畫面開著時掃到「/ 開頭」的就自動切成手機條碼
+        // 掃描槍像鍵盤：很快打完一串再按 Enter。付款畫面或「改開發票」視窗開著時，掃到「/ 開頭」的就自動切成手機條碼
         let scanBuf = '', scanLast = 0;
         document.addEventListener('keydown', (e) => {
-            if (!invoiceOn || document.getElementById('payModal').hidden) return;
-            if (e.target.id === 'invInput' && invKind === 'carrier') return;   // 已經在手機條碼欄位，交給欄位本身
+            if (!invoiceOn) return;
+            const riOpen = !document.getElementById('riModal').hidden && riMode === 'reissue';
+            if (!riOpen && document.getElementById('payModal').hidden) return;
+            // 已經在手機條碼欄位，交給欄位本身
+            if (riOpen ? (e.target.id === 'riInput' && riKind === 'carrier') : (e.target.id === 'invInput' && invKind === 'carrier')) return;
             const now = Date.now();
             if (now - scanLast > 80) scanBuf = '';
             scanLast = now;
             if (e.key === 'Enter') {
                 if (scanBuf.startsWith('/')) {
                     e.preventDefault();
-                    setInvKind('carrier', true);
-                    const input = document.getElementById('invInput');
+                    if (riOpen) setRiKind('carrier', true); else setInvKind('carrier', true);
+                    const input = document.getElementById(riOpen ? 'riInput' : 'invInput');
                     input.value = scanBuf;
-                    checkInvInput();
+                    if (riOpen) checkRiInput(); else checkInvInput();
                     input.classList.remove('inv-flash'); void input.offsetWidth; input.classList.add('inv-flash');
                 }
                 scanBuf = '';
@@ -2199,6 +2243,101 @@
                 if (scanBuf.startsWith('/') && e.target.tagName === 'INPUT') e.preventDefault();
             }
         });
+
+        // ---- 結帳紀錄：改開／作廢發票（要後台密碼）----
+        let riMode = 'reissue', riKind = 'paper', riOrderNo = '', riInvoiceId = null;
+        let riWheelTimer = null, riFromWheel = false;
+
+        function openReissue(orderNo, mode, invoiceNo, invoiceId) {
+            riMode = mode; riOrderNo = orderNo; riInvoiceId = invoiceId;
+            document.getElementById('riTitle').textContent = mode === 'void' ? '作廢發票' : invoiceNo ? '改開發票' : '開立發票';
+            const from = document.getElementById('riFrom');
+            from.textContent = invoiceNo ? `目前：發票 ${invoiceNo}${mode === 'reissue' ? '（會先作廢，再開一張新的）' : ''}` : '這張單目前沒有有效的發票，會開一張新的';
+            document.getElementById('riKindBox').hidden = mode === 'void';
+            document.getElementById('riVoidBox').hidden = mode !== 'void';
+            const go = document.getElementById('riGo');
+            go.textContent = mode === 'void' ? '確定作廢' : invoiceNo ? '作廢舊的、開新的' : '開立發票';
+            go.style.background = mode === 'void' ? '#e03131' : '';
+            document.getElementById('riPass').value = '';
+            document.getElementById('riMessage').innerHTML = '';
+            document.getElementById('riModal').hidden = false;
+            if (mode !== 'void') { setRiKind('paper'); document.getElementById('riWheel').scrollTop = 0; }
+        }
+
+        function closeReissue() {
+            document.getElementById('riPass').value = '';
+            document.getElementById('riModal').hidden = true;
+        }
+
+        function onRiWheelScroll() {
+            clearTimeout(riWheelTimer);
+            const wheel = document.getElementById('riWheel');
+            const i = Math.max(0, Math.min(INV_KINDS.length - 1, Math.round(wheel.scrollTop / INV_ROW)));
+            wheel.querySelectorAll('button').forEach((b, j) => b.classList.toggle('on', j === i));
+            riWheelTimer = setTimeout(() => {
+                if (INV_KINDS[i] !== riKind) { riFromWheel = true; setRiKind(INV_KINDS[i]); riFromWheel = false; }
+            }, 120);
+        }
+
+        function setRiKind(kind, keepValue) {
+            riKind = kind;
+            document.querySelectorAll('#riWheel button').forEach(b => b.classList.toggle('on', b.dataset.kind === kind));
+            if (!riFromWheel) document.getElementById('riWheel').scrollTo({ top: INV_KINDS.indexOf(kind) * INV_ROW, behavior: 'smooth' });
+            const input = document.getElementById('riInput');
+            document.getElementById('riInputBox').hidden = kind === 'paper';
+            if (kind !== 'paper') {
+                document.getElementById('riInputLabel').textContent = kind === 'carrier' ? '手機條碼（掃描槍直接掃）' : '統一編號（8 碼）';
+                input.placeholder = kind === 'carrier' ? '/ABC1234' : '12345678';
+                input.inputMode = kind === 'taxid' ? 'numeric' : 'text';
+            }
+            if (!keepValue) input.value = '';
+            checkRiInput();
+        }
+
+        function checkRiInput() {
+            const v = document.getElementById('riInput').value.trim().toUpperCase();
+            const el = document.getElementById('riStatus');
+            const show = (cls, text) => { el.hidden = !text; el.className = 'inv-status ' + cls; el.textContent = text; };
+            if (riKind === 'paper') return show('', ''), true;
+            if (!v) return show('hint', riKind === 'carrier' ? '請掃客人的手機條碼' : '請輸入統一編號'), false;
+            if (riKind === 'carrier') return CARRIER_RE.test(v)
+                ? (show('ok', `✅ 手機條碼 ${v}`), true) : (show('bad', `手機條碼要是「/」開頭、共 8 碼，目前是 ${v.length} 碼`), false);
+            return validTaxId(v) ? (show('ok', `✅ 統一編號 ${v}`), true) : (show('bad', '統一編號不正確'), false);
+        }
+
+        async function submitReissue() {
+            const msg = document.getElementById('riMessage');
+            const fail = (text) => { msg.innerHTML = `<div class="message error">${esc(text)}</div>`; };
+            if (riMode !== 'void' && !checkRiInput()) return fail(riKind === 'carrier' ? '手機條碼不正確' : '統一編號不正確');
+            const pass = document.getElementById('riPass').value;
+            if (!pass) return fail('請輸入後台密碼');
+            const v = document.getElementById('riInput').value.trim().toUpperCase();
+            const body = riMode === 'void'
+                ? { id: riInvoiceId, reason: document.getElementById('riReason').value.trim() || '客人要求作廢' }
+                : { order_no: riOrderNo, kind: riKind, carrier: riKind === 'carrier' ? v : '', tax_id: riKind === 'taxid' ? v : '' };
+            const go = document.getElementById('riGo');
+            go.disabled = true;
+            try {
+                const basic = btoa(String.fromCharCode(...new TextEncoder().encode(`admin:${pass}`)));
+                const res = await fetch(`${API_URL()}/api/admin/invoices/${riMode === 'void' ? 'void' : 'reissue'}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${basic}`, 'X-No-Auth-Prompt': '1' },
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json().catch(() => ({}));
+                if (res.status === 401) throw new Error('後台密碼錯誤');
+                if (!res.ok) throw new Error(data.message || res.status);
+                closeReissue();
+                showMessage(`✓ ${data.message}${data.data && data.data.print_flag ? '（請印證明聯給客人）' : ''}`, 'success');
+                loadOrders();
+            } catch (error) {
+                fail(error.message);
+                loadOrders();   // 可能舊發票已作廢、新的沒開成功，畫面要更新
+            } finally {
+                document.getElementById('riPass').value = '';
+                go.disabled = false;
+            }
+        }
 
         // 結帳後開發票（交易已經存好；開立失敗不影響交易，回傳要顯示的文字）
         async function issueInvoiceFor(orderNo, choice) {
@@ -3177,7 +3316,7 @@
                 rows.forEach(r => {
                     let o = r.order_no && orders.find(o => o.no === r.order_no);
                     if (!o) orders.push(o = { no: r.order_no, time: r.timestamp, staff: r.staff, customer: r.customer_name, payment: r.payment_method, taxId: r.tax_id,
-                                              invoiceNo: r.invoice_no, invoiceStatus: r.invoice_status, lines: [], total: 0 });
+                                              invoiceId: r.invoice_id, invoiceNo: r.invoice_no, invoiceStatus: r.invoice_status, lines: [], total: 0 });
                     o.lines.push(r);
                     o.total += r.total;
                     o.discount = (o.discount || 0) + (r.discount || 0);
@@ -3207,9 +3346,15 @@
                             </div>`).join('')}
                         ${o.discount ? `<div class="order-line" style="color:#e03131"><span>折扣</span><span>-NT$${o.discount.toLocaleString()}</span></div>` : ''}
                         <div class="order-total"><span>合計</span><span>NT$${o.total.toLocaleString()}</span></div>
-                        ${invoiceOn && o.invoiceStatus ? `<div class="order-line" style="color:${o.invoiceStatus === 'issued' ? '#2b8a3e' : '#e03131'}">
+                        ${invoiceOn && o.no ? `<div class="order-line order-invoice" style="color:${o.invoiceStatus === 'issued' ? '#2b8a3e' : o.invoiceStatus ? '#e03131' : '#999'}">
                             <span>${o.invoiceStatus === 'issued' ? `🧾 發票 ${esc(o.invoiceNo)}`
-                                : o.invoiceStatus === 'void' ? '🧾 發票已作廢' : '⚠️ 發票未開立（到後台發票紀錄補開）'}</span></div>` : ''}
+                                : o.invoiceStatus === 'void' ? `🧾 發票 ${esc(o.invoiceNo || '')} 已作廢`
+                                : o.invoiceStatus === 'failed' ? '⚠️ 發票開立失敗' : '🧾 沒有開發票'}</span>
+                            <span class="order-inv-btns">${o.invoiceStatus === 'issued'
+                                ? `<button onclick="openReissue('${esc(o.no)}', 'reissue', '${esc(o.invoiceNo)}', ${o.invoiceId})">改開發票</button>
+                                   <button class="danger" onclick="openReissue('${esc(o.no)}', 'void', '${esc(o.invoiceNo)}', ${o.invoiceId})">作廢發票</button>`
+                                : `<button onclick="openReissue('${esc(o.no)}', 'reissue', '', null)">${o.invoiceStatus ? '重新開立' : '開立發票'}</button>`}</span>
+                        </div>` : ''}
                     </div>`).join('') : '<div class="empty">今天還沒有交易紀錄</div>';
             } catch (error) {
                 list.innerHTML = `<div class="message error">載入失敗：${esc(error.message)}</div>`;

@@ -2548,6 +2548,14 @@
                 ? `共 ${list.length} 筆，畫面只顯示最新 ${MAX_SALES_ROWS} 筆，請縮小日期範圍；「匯出」會包含全部 ${list.length} 筆。` : '';
         }
 
+        // 交易紀錄的發票號碼（綠色＝已開立、灰色刪除線＝已作廢、紅色＝開立失敗）
+        function invoiceTag(r) {
+            if (!r.invoice_status) return '';
+            if (r.invoice_status === 'failed') return '<br><small style="color:#e03131">⚠️ 發票開立失敗</small>';
+            const voided = r.invoice_status === 'void';
+            return `<br><small style="color:${voided ? '#adb5bd' : '#2b8a3e'};${voided ? 'text-decoration:line-through;' : ''}">🧾 ${escHtml(r.invoice_no || '')}</small>`;
+        }
+
         function saleRowHtml(r) {
             return `
                 <tr data-sale="${r.id}">
@@ -2558,7 +2566,7 @@
                     <td>${escHtml(r.product_name)}</td>
                     <td>${r.quantity}</td>
                     <td>NT$${r.total.toLocaleString()}${r.discount ? `<br><small style="color:#e03131">折 ${r.discount}</small>` : ''}</td>
-                    <td>${escHtml(r.payment_method || '')}${r.tax_id ? `<br><small>統編 ${escHtml(r.tax_id)}</small>` : ''}</td>
+                    <td>${escHtml(r.payment_method || '')}${r.tax_id ? `<br><small>統編 ${escHtml(r.tax_id)}</small>` : ''}${invoiceTag(r)}</td>
                     <td style="white-space: nowrap;">
                         <button class="row-btn" onclick="editSaleRow(${r.id})">✏️</button>
                         <button class="row-btn danger" onclick="deleteSaleRow(${r.id})">🗑️</button>
