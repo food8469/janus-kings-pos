@@ -711,6 +711,10 @@ function toRecord(r) {
     invoice_id: r.invoice_id || null,
     invoice_no: r.invoice_no || null,
     invoice_status: r.invoice_status || null,
+    invoice_kind: r.invoice_kind || null,
+    invoice_carrier: r.invoice_carrier || null,
+    invoice_tax_id: r.invoice_tax_id || null,
+    invoice_voided: r.invoice_voided ? r.invoice_voided.split(',') : [],   // 這張單作廢過的發票號碼
   };
 }
 
@@ -964,6 +968,8 @@ async function reissueOrder(body, operator, store) {
   if (inv.skipped) return { message: `${note}${inv.message}`, data: inv };
   if (inv.status !== 'issued') throw new InputError(`${note}新發票開立失敗：${inv.error || ''}`);
   await pool.query('UPDATE invoices SET operator = $1 WHERE id = $2', [operator, inv.id]);
+  // 交易上的統編跟著新發票（改開成統編就填上，改成一般或手機條碼就拿掉），結帳紀錄和報表才會一致
+  await pool.query('UPDATE sales SET tax_id = $1 WHERE order_no = $2', [kind === 'taxid' ? taxId : null, orderNo]);
   return { message: `${note}新發票 ${inv.invoice_no}`, data: { ...inv, operator } };
 }
 
@@ -1007,8 +1013,14 @@ app.post('/api/admin/invoices/void', requireAdmin, async (req, res) => {
 
 // 每筆銷售帶上這張單最新的發票（號碼、狀態）
 const INVOICE_JOIN = `LEFT JOIN LATERAL (
-  SELECT id AS invoice_id, invoice_no, status AS invoice_status FROM invoices WHERE invoices.order_no = sales.order_no ORDER BY id DESC LIMIT 1
-) inv ON TRUE`;
+  SELECT id AS invoice_id, invoice_no, status AS invoice_status, kind AS invoice_kind, carrier AS invoice_carrier,
+         tax_id AS invoice_tax_id
+  FROM invoices WHERE invoices.order_no = sales.order_no ORDER BY id DESC LIMIT 1
+) inv ON TRUE
+LEFT JOIN LATERAL (
+  SELECT string_agg(invoice_no, ',' ORDER BY id) AS invoice_voided
+  FROM invoices WHERE invoices.order_no = sales.order_no AND status = 'void' AND invoice_no IS NOT NULL
+) invv ON TRUE`;
 
 // ============ 顧客 ============
 const cleanText = (v, max) => String(v ?? '').trim().slice(0, max) || null;

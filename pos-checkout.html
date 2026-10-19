@@ -251,6 +251,8 @@
         .inv-status.hint { background: #f4f5f8; color: #888; }
         .order-invoice { align-items: center; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
         .order-inv-btns { display: flex; gap: 6px; }
+        .order-inv-kind { margin-left: 8px; color: #555; font-size: 13px; }
+        .order-inv-old { font-size: 12px; color: #999; margin-top: 2px; }
         .order-inv-btns button { padding: 5px 10px; font-size: 13px; border-radius: 8px; border: 1px solid #667eea; background: white; color: #667eea; cursor: pointer; font-family: inherit; }
         .order-inv-btns button.danger { border-color: #e03131; color: #e03131; }
         #riModal .modal-card { display: flex; flex-direction: column; gap: 8px; }
@@ -2243,7 +2245,14 @@
             }
         });
 
-        // ---- 結帳紀錄：改開／作廢發票（要後台密碼）----
+        // 結帳紀錄上發票類型的文字：一般／手機條碼 /ABC1234／統編 12345678
+        function invoiceKindText(o) {
+            if (o.invoiceKind === 'carrier') return `手機條碼 ${o.invoiceCarrier || ''}`;
+            if (o.invoiceKind === 'taxid') return `統編 ${o.invoiceTaxId || ''}`;
+            return '一般';
+        }
+
+        // ---- 結帳紀錄：改開／作廢發票（不用密碼，記錄處理人員）----
         let riMode = 'reissue', riKind = 'paper', riOrderNo = '', riInvoiceId = null;
         let riWheelTimer = null, riFromWheel = false;
 
@@ -3320,7 +3329,9 @@
                 rows.forEach(r => {
                     let o = r.order_no && orders.find(o => o.no === r.order_no);
                     if (!o) orders.push(o = { no: r.order_no, time: r.timestamp, staff: r.staff, customer: r.customer_name, payment: r.payment_method, taxId: r.tax_id,
-                                              invoiceId: r.invoice_id, invoiceNo: r.invoice_no, invoiceStatus: r.invoice_status, lines: [], total: 0 });
+                                              invoiceId: r.invoice_id, invoiceNo: r.invoice_no, invoiceStatus: r.invoice_status,
+                                              invoiceKind: r.invoice_kind, invoiceCarrier: r.invoice_carrier, invoiceTaxId: r.invoice_tax_id,
+                                              invoiceVoided: r.invoice_voided || [], lines: [], total: 0 });
                     o.lines.push(r);
                     o.total += r.total;
                     o.discount = (o.discount || 0) + (r.discount || 0);
@@ -3351,14 +3362,18 @@
                         ${o.discount ? `<div class="order-line" style="color:#e03131"><span>折扣</span><span>-NT$${o.discount.toLocaleString()}</span></div>` : ''}
                         <div class="order-total"><span>合計</span><span>NT$${o.total.toLocaleString()}</span></div>
                         ${invoiceOn && o.no ? `<div class="order-line order-invoice" style="color:${o.invoiceStatus === 'issued' ? '#2b8a3e' : o.invoiceStatus ? '#e03131' : '#999'}">
-                            <span>${o.invoiceStatus === 'issued' ? `🧾 發票 ${esc(o.invoiceNo)}`
+                            <span>${o.invoiceStatus === 'issued' ? `🧾 發票 ${esc(o.invoiceNo)}<small class="order-inv-kind">${esc(invoiceKindText(o))}</small>`
                                 : o.invoiceStatus === 'void' ? `🧾 發票 ${esc(o.invoiceNo || '')} 已作廢`
                                 : o.invoiceStatus === 'failed' ? '⚠️ 發票開立失敗' : '🧾 沒有開發票'}</span>
                             <span class="order-inv-btns">${o.invoiceStatus === 'issued'
                                 ? `<button onclick="openReissue('${esc(o.no)}', 'reissue', '${esc(o.invoiceNo)}', ${o.invoiceId})">改開發票</button>
                                    <button class="danger" onclick="openReissue('${esc(o.no)}', 'void', '${esc(o.invoiceNo)}', ${o.invoiceId})">作廢發票</button>`
                                 : `<button onclick="openReissue('${esc(o.no)}', 'reissue', '', null)">${o.invoiceStatus ? '重新開立' : '開立發票'}</button>`}</span>
-                        </div>` : ''}
+                        </div>
+                        ${(() => {   // 這張單之前作廢過的發票（目前顯示的那張不重複列）
+                            const old = o.invoiceVoided.filter(n => n !== o.invoiceNo);
+                            return old.length ? `<div class="order-inv-old">已作廢：${old.map(esc).join('、')}</div>` : '';
+                        })()}` : ''}
                     </div>`).join('') : '<div class="empty">今天還沒有交易紀錄</div>';
             } catch (error) {
                 list.innerHTML = `<div class="message error">載入失敗：${esc(error.message)}</div>`;
