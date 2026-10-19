@@ -292,6 +292,8 @@ async function initDb() {
       voided_at      TIMESTAMPTZ
     );
     CREATE INDEX IF NOT EXISTS invoices_order_no_idx ON invoices (order_no);
+    -- 誰作廢或改開的（前台是當下的銷售員，後台寫「後台」）
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS operator TEXT;
   `);
   // 員工名單是空的才放入預設人員（之後在後台管理）
   const { rows: [{ count }] } = await pool.query('SELECT COUNT(*)::int AS count FROM staff');
@@ -850,13 +852,13 @@ async function issueInvoice(orderNo, { kind, carrier, taxId }, relateNumber = or
 }
 
 // 作廢一張已開立的發票
-async function voidInvoice(inv, reason) {
+async function voidInvoice(inv, reason, operator = '後台') {
   const result = await ecpayCall('Invalid', {
     InvoiceNo: inv.invoice_no, InvoiceDate: String(inv.invoice_date).slice(0, 10).replace(/\//g, '-'),
     Reason: String(reason || '交易修改').slice(0, 20),
   });
   if (Number(result.RtnCode) !== 1) throw new Error(result.RtnMsg || `作廢失敗（${result.RtnCode}）`);
-  await pool.query(`UPDATE invoices SET status = 'void', voided_at = NOW() WHERE id = $1`, [inv.id]);
+  await pool.query(`UPDATE invoices SET status = 'void', voided_at = NOW(), operator = $2 WHERE id = $1`, [inv.id, operator]);
 }
 
 // 後台修改或刪除交易後：這張單的發票金額對不上了 → 作廢舊的，剩下的品項重開一張（同樣的發票類型）
@@ -875,6 +877,7 @@ async function resyncInvoice(orderNo) {
   if (!count) return `發票 ${inv.invoice_no} 已作廢`;
   const { rows: [{ n }] } = await pool.query('SELECT COUNT(*)::int AS n FROM invoices WHERE order_no = $1', [orderNo]);
   const again = await issueInvoice(orderNo, { kind: inv.kind, carrier: inv.carrier, taxId: inv.tax_id }, `${orderNo}R${n}`);
+  if (again.id) await pool.query(`UPDATE invoices SET operator = '後台' WHERE id = $1`, [again.id]);
   return again.status === 'issued'
     ? `發票 ${inv.invoice_no} 已作廢，重開新發票 ${again.invoice_no}${again.print_flag ? '（請補印給客人）' : ''}`
     : `發票 ${inv.invoice_no} 已作廢，但重開失敗：${again.error || ''}，請到發票紀錄補開`;
@@ -932,48 +935,74 @@ app.post('/api/admin/invoices/retry', requireAdmin, async (req, res) => {
   res.json({ status: 'success', message: `已補開發票 ${again.invoice_no}`, data: again });
 });
 
-// 改開發票（前台結帳紀錄用，要後台密碼）：舊的已開立就先作廢，再用新的類型開一張
+// 改開發票：舊的已開立就先作廢，再用新的類型開一張；operator 記錄是誰處理的（前台是當下的銷售員，後台寫「後台」）
 // 最新那張是開立失敗的，就用同一個編號再試（不會多出一筆失敗紀錄）
-app.post('/api/admin/invoices/reissue', requireAdmin, async (req, res) => {
-  if (!invoiceEnabled()) return res.status(400).json({ status: 'error', message: '發票功能未啟用' });
-  const orderNo = String(req.body?.order_no || '').slice(0, 40);
-  const kind = INVOICE_KINDS.includes(req.body?.kind) ? req.body.kind : 'paper';
-  const carrier = String(req.body?.carrier || '').trim().toUpperCase();
-  const taxId = String(req.body?.tax_id || '').trim();
-  if (kind === 'carrier' && !CARRIER_RE.test(carrier)) return res.status(400).json({ status: 'error', message: '手機條碼格式錯誤' });
-  if (kind === 'taxid' && !validTaxId(taxId)) return res.status(400).json({ status: 'error', message: '統一編號不正確' });
-  const { rows: [{ count }] } = await pool.query('SELECT COUNT(*)::int AS count FROM sales WHERE order_no = $1', [orderNo]);
-  if (!count) return res.status(404).json({ status: 'error', message: '找不到這張單' });
+async function reissueOrder(body, operator, store) {
+  const orderNo = String(body?.order_no || '').slice(0, 40);
+  const kind = INVOICE_KINDS.includes(body?.kind) ? body.kind : 'paper';
+  const carrier = String(body?.carrier || '').trim().toUpperCase();
+  const taxId = String(body?.tax_id || '').trim();
+  if (kind === 'carrier' && !CARRIER_RE.test(carrier)) throw new InputError('手機條碼格式錯誤');
+  if (kind === 'taxid' && !validTaxId(taxId)) throw new InputError('統一編號不正確');
+  const { rows: [sale] } = await pool.query('SELECT store FROM sales WHERE order_no = $1 LIMIT 1', [orderNo]);
+  if (!sale) throw new InputError('找不到這張單');
+  if (store && sale.store !== store) throw new InputError('不是這家門市的單');
 
   const { rows: [last] } = await pool.query('SELECT * FROM invoices WHERE order_no = $1 ORDER BY id DESC LIMIT 1', [orderNo]);
   let note = '';
   if (last && last.status === 'issued') {
     try {
-      await voidInvoice(last, req.body?.reason || '改開發票');
+      await voidInvoice(last, body?.reason || '改開發票', operator);
     } catch (err) {
-      return res.status(400).json({ status: 'error', message: `舊發票 ${last.invoice_no} 作廢失敗：${err.message}` });
+      throw new InputError(`舊發票 ${last.invoice_no} 作廢失敗：${err.message}`);
     }
     note = `舊發票 ${last.invoice_no} 已作廢，`;
   }
   const { rows: [{ n }] } = await pool.query('SELECT COUNT(*)::int AS n FROM invoices WHERE order_no = $1', [orderNo]);
   const relate = last && last.status === 'failed' ? last.relate_number : (n ? `${orderNo}R${n}` : orderNo);
   const inv = await issueInvoice(orderNo, { kind, carrier, taxId }, relate);
-  if (inv.skipped) return res.json({ status: 'success', message: `${note}${inv.message}`, data: inv });
-  if (inv.status !== 'issued') return res.status(400).json({ status: 'error', message: `${note}新發票開立失敗：${inv.error || ''}` });
-  res.json({ status: 'success', message: `${note}新發票 ${inv.invoice_no}`, data: inv });
+  if (inv.skipped) return { message: `${note}${inv.message}`, data: inv };
+  if (inv.status !== 'issued') throw new InputError(`${note}新發票開立失敗：${inv.error || ''}`);
+  await pool.query('UPDATE invoices SET operator = $1 WHERE id = $2', [operator, inv.id]);
+  return { message: `${note}新發票 ${inv.invoice_no}`, data: { ...inv, operator } };
+}
+
+// 只作廢、不重開（交易不動）
+async function voidOnly(id, reason, operator, store) {
+  const { rows: [inv] } = await pool.query(`SELECT * FROM invoices WHERE id = $1`, [toInt(id, '發票')]);
+  if (!inv || inv.status !== 'issued') throw new InputError('只有已開立的發票可以作廢');
+  if (store && inv.store !== store) throw new InputError('不是這家門市的發票');
+  try {
+    await voidInvoice(inv, reason, operator);
+  } catch (err) {
+    throw new InputError(`作廢失敗：${err.message}`);
+  }
+  return { message: `發票 ${inv.invoice_no} 已作廢` };
+}
+
+// 前台結帳紀錄：改開／作廢（不用密碼，記錄當下的銷售員；只能處理自己門市的單）
+const frontOperator = (req) => {
+  const name = String(req.body?.staff || '').trim().slice(0, 30);
+  if (!name) throw new InputError('請先選擇銷售員，系統會記錄是誰處理的');
+  return name;
+};
+app.post('/api/invoice/reissue', requireDevice, async (req, res) => {
+  if (!invoiceEnabled()) return res.status(400).json({ status: 'error', message: '發票功能未啟用' });
+  res.json({ status: 'success', ...await reissueOrder(req.body, frontOperator(req), req.device && req.device.store) });
+});
+app.post('/api/invoice/void', requireDevice, async (req, res) => {
+  if (!invoiceEnabled()) return res.status(400).json({ status: 'error', message: '發票功能未啟用' });
+  res.json({ status: 'success', ...await voidOnly(req.body?.id, req.body?.reason, frontOperator(req), req.device && req.device.store) });
 });
 
-// 後台：作廢發票（交易不動；例如客人要改開統編）
+// 後台：改開、作廢
+app.post('/api/admin/invoices/reissue', requireAdmin, async (req, res) => {
+  if (!invoiceEnabled()) return res.status(400).json({ status: 'error', message: '發票功能未啟用' });
+  res.json({ status: 'success', ...await reissueOrder(req.body, '後台') });
+});
 app.post('/api/admin/invoices/void', requireAdmin, async (req, res) => {
   if (!invoiceEnabled()) return res.status(400).json({ status: 'error', message: '發票功能未啟用' });
-  const { rows: [inv] } = await pool.query(`SELECT * FROM invoices WHERE id = $1`, [toInt(req.body?.id, '發票')]);
-  if (!inv || inv.status !== 'issued') return res.status(400).json({ status: 'error', message: '只有已開立的發票可以作廢' });
-  try {
-    await voidInvoice(inv, req.body?.reason);
-  } catch (err) {
-    return res.status(400).json({ status: 'error', message: `作廢失敗：${err.message}` });
-  }
-  res.json({ status: 'success', message: `發票 ${inv.invoice_no} 已作廢` });
+  res.json({ status: 'success', ...await voidOnly(req.body?.id, req.body?.reason, '後台') });
 });
 
 // 每筆銷售帶上這張單最新的發票（號碼、狀態）

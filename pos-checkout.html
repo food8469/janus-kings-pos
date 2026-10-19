@@ -646,8 +646,7 @@
                 <label for="riReason">作廢原因（20 字以內）</label>
                 <input type="text" id="riReason" maxlength="20" value="客人要求作廢">
             </div>
-            <label for="riPass">後台密碼（店長確認用）</label>
-            <input type="password" id="riPass" autocomplete="off" placeholder="輸入後台密碼才能執行">
+            <div class="inv-status hint" id="riOperator"></div>
             <button class="checkout-btn" id="riGo" onclick="submitReissue()"></button>
             <div id="riMessage"></div>
         </div>
@@ -2258,14 +2257,17 @@
             const go = document.getElementById('riGo');
             go.textContent = mode === 'void' ? '確定作廢' : invoiceNo ? '作廢舊的、開新的' : '開立發票';
             go.style.background = mode === 'void' ? '#e03131' : '';
-            document.getElementById('riPass').value = '';
+            // 不用密碼，記錄當下的銷售員是誰處理的
+            const staff = document.getElementById('staff').value;
+            const op = document.getElementById('riOperator');
+            op.className = 'inv-status ' + (staff ? 'hint' : 'bad');
+            op.textContent = staff ? `處理人員：${staff}（會記錄在後台發票紀錄）` : '請先選擇銷售員（購物車下方的「銷售人員」），系統會記錄是誰處理的';
             document.getElementById('riMessage').innerHTML = '';
             document.getElementById('riModal').hidden = false;
             if (mode !== 'void') { setRiKind('paper'); document.getElementById('riWheel').scrollTop = 0; }
         }
 
         function closeReissue() {
-            document.getElementById('riPass').value = '';
             document.getElementById('riModal').hidden = true;
         }
 
@@ -2309,23 +2311,26 @@
             const msg = document.getElementById('riMessage');
             const fail = (text) => { msg.innerHTML = `<div class="message error">${esc(text)}</div>`; };
             if (riMode !== 'void' && !checkRiInput()) return fail(riKind === 'carrier' ? '手機條碼不正確' : '統一編號不正確');
-            const pass = document.getElementById('riPass').value;
-            if (!pass) return fail('請輸入後台密碼');
+            const staff = document.getElementById('staff').value;
+            if (!staff) return fail('請先選擇銷售員（購物車下方的「銷售人員」）');
             const v = document.getElementById('riInput').value.trim().toUpperCase();
             const body = riMode === 'void'
-                ? { id: riInvoiceId, reason: document.getElementById('riReason').value.trim() || '客人要求作廢' }
-                : { order_no: riOrderNo, kind: riKind, carrier: riKind === 'carrier' ? v : '', tax_id: riKind === 'taxid' ? v : '' };
+                ? { id: riInvoiceId, staff, reason: document.getElementById('riReason').value.trim() || '客人要求作廢' }
+                : { order_no: riOrderNo, staff, kind: riKind, carrier: riKind === 'carrier' ? v : '', tax_id: riKind === 'taxid' ? v : '' };
+            // 不用密碼，按下去前再確認一次，避免手滑
+            const from = document.getElementById('riFrom').textContent.match(/發票 (\S{10})/);
+            const ask = riMode === 'void' ? `確定要作廢${from ? '發票 ' + from[1] : '這張發票'}嗎？`
+                : from ? `確定要作廢發票 ${from[1]}，改開成「${INV_NAMES[riKind][0]}」嗎？` : `確定要開立「${INV_NAMES[riKind][0]}」發票嗎？`;
+            if (!confirm(ask)) return;
             const go = document.getElementById('riGo');
             go.disabled = true;
             try {
-                const basic = btoa(String.fromCharCode(...new TextEncoder().encode(`admin:${pass}`)));
-                const res = await fetch(`${API_URL()}/api/admin/invoices/${riMode === 'void' ? 'void' : 'reissue'}`, {
+                const res = await posFetch(`/api/invoice/${riMode === 'void' ? 'void' : 'reissue'}`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': `Basic ${basic}`, 'X-No-Auth-Prompt': '1' },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body)
                 });
                 const data = await res.json().catch(() => ({}));
-                if (res.status === 401) throw new Error('後台密碼錯誤');
                 if (!res.ok) throw new Error(data.message || res.status);
                 closeReissue();
                 showMessage(`✓ ${data.message}${data.data && data.data.print_flag ? '（請印證明聯給客人）' : ''}`, 'success');
@@ -2334,7 +2339,6 @@
                 fail(error.message);
                 loadOrders();   // 可能舊發票已作廢、新的沒開成功，畫面要更新
             } finally {
-                document.getElementById('riPass').value = '';
                 go.disabled = false;
             }
         }

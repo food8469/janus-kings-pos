@@ -229,7 +229,7 @@
             <div id="invSummaryBox" class="stat-box"></div>
             <div style="overflow-x: auto;">
             <table id="invTable">
-                <thead><tr><th>時間</th><th>門市</th><th>發票號碼</th><th>類型</th><th>金額</th><th>狀態</th><th></th></tr></thead>
+                <thead><tr><th>時間</th><th>門市</th><th>發票號碼</th><th>類型</th><th>金額</th><th>狀態</th><th>處理人員</th><th></th></tr></thead>
                 <tbody></tbody>
             </table>
             </div>
@@ -942,10 +942,11 @@
                     <td>${INV_KIND_NAMES[i.kind] || i.kind}${detail}</td>
                     <td>${ntd(i.amount)}</td>
                     <td style="color:${color}; font-weight:bold;">${label}${i.error ? `<br><small style="font-weight:normal">${escHtml(i.error)}</small>` : ''}</td>
+                    <td>${i.operator ? `${escHtml(i.operator)} ${i.status === 'void' ? '作廢' : '改開'}` : ''}</td>
                     <td>${i.status === 'failed' ? `<button onclick="retryInvoice(${i.id})">補開</button>` : ''}
                         ${i.status === 'issued' ? `<button class="secondary" onclick="voidInvoice(${i.id}, '${escHtml(i.invoice_no)}')">作廢</button>` : ''}</td>
                 </tr>`;
-            }).join('') : '<tr><td colspan="7" style="text-align:center; color:#999;">這段期間沒有發票</td></tr>';
+            }).join('') : '<tr><td colspan="8" style="text-align:center; color:#999;">這段期間沒有發票</td></tr>';
         }
 
         async function retryInvoice(id) {
