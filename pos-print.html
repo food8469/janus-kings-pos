@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>野烏金 POS - 發票列印站</title>
+<style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: "Microsoft JhengHei", "PingFang TC", sans-serif; background: #f4f5f8; color: #333; padding: 20px; }
+    .wrap { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 14px; }
+    h1 { font-size: 22px; }
+    .card { background: white; border-radius: 12px; padding: 16px 18px; border: 1px solid #e6e7ec; }
+    .state { display: flex; align-items: center; gap: 12px; font-size: 20px; font-weight: bold; }
+    .dot { width: 16px; height: 16px; border-radius: 50%; background: #adb5bd; flex: none; }
+    .dot.on { background: #2b8a3e; box-shadow: 0 0 0 6px rgba(43, 138, 62, .15); }
+    .dot.err { background: #e03131; }
+    .sub { font-size: 14px; color: #888; margin-top: 6px; line-height: 1.7; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; }
+    button { font-family: inherit; font-size: 15px; padding: 10px 16px; border-radius: 8px; border: 1px solid #667eea; background: white; color: #667eea; cursor: pointer; }
+    button.main { background: #667eea; color: white; }
+    .log { font-size: 14px; }
+    .log div { display: flex; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid #f0f0f0; }
+    .log .ok { color: #2b8a3e; }
+    .log .bad { color: #e03131; }
+    .help { font-size: 14px; line-height: 1.9; color: #555; }
+    .help code { background: #f1f3f5; padding: 1px 6px; border-radius: 4px; }
+    #frame { position: fixed; left: -10000px; top: 0; width: 400px; height: 800px; border: 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+    <h1>🧾 發票列印站</h1>
+
+    <div class="card">
+        <div class="state"><span class="dot" id="dot"></span><span id="stateText">啟動中…</span></div>
+        <div class="sub" id="stateSub"></div>
+    </div>
+
+    <div class="card">
+        <div class="row">
+            <button class="main" id="pauseBtn" onclick="togglePause()">⏸ 暫停列印</button>
+            <button onclick="testPrint()">🖨️ 印一張測試頁</button>
+        </div>
+        <div class="sub">這個視窗要一直開著（可以縮小，不要關掉）。結帳開出要印紙本的發票時，會自動印到發票機。</div>
+    </div>
+
+    <div class="card">
+        <b>最近列印</b>
+        <div class="log" id="log"><div><span style="color:#999">還沒有列印紀錄</span></div></div>
+    </div>
+
+    <div class="card help">
+        <b>第一次設定（只要做一次）</b><br>
+        1. 這台電腦要先登記成門市裝置：用 Chrome 打開 POS 前台，登記一次（裝置名稱例如「櫃檯電腦」）。<br>
+        2. Windows 的「印表機」設定裡，把發票機設成<b>預設印表機</b>。<br>
+        3. 用桌面上的「發票列印站」捷徑打開這個頁面（捷徑有加 <code>--kiosk-printing</code>，列印時不會跳出視窗，直接印）。
+    </div>
+</div>
+<iframe id="frame" title="列印用"></iframe>
+
+<script>
+    const DEVICE_KEY = 'pos_punch_device';   // 跟前台共用同一個裝置登記
+    const token = (() => { try { return localStorage.getItem(DEVICE_KEY); } catch (e) { return null; } })();
+    const POLL_MS = 3000;
+    let paused = false, busy = false, device = null;
+    const logs = [];
+
+    const $ = (id) => document.getElementById(id);
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const timeNow = () => new Date().toLocaleTimeString('zh-TW', { hour12: false });
+
+    function setState(kind, text, sub) {
+        $('dot').className = 'dot ' + (kind || '');
+        $('stateText').textContent = text;
+        $('stateSub').innerHTML = sub || '';
+    }
+
+    function addLog(ok, text) {
+        logs.unshift({ ok, text, at: timeNow() });
+        logs.length = Math.min(logs.length, 30);
+        $('log').innerHTML = logs.map(l => `<div><span class="${l.ok ? 'ok' : 'bad'}">${l.ok ? '✓' : '✕'} ${esc(l.text)}</span><span style="color:#999">${l.at}</span></div>`).join('');
+    }
+
+    async function api(path, options = {}) {
+        const res = await fetch(path, { ...options, headers: { ...(options.headers || {}), 'X-Device-Token': token || '' } });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.message || `HTTP ${res.status}`);
+        return data;
+    }
+
+    // 把 HTML 放進隱藏的 iframe 印出來；等圖片（QR Code、條碼）都載入完才印
+    function printHtml(html) {
+        return new Promise((resolve, reject) => {
+            const frame = $('frame');
+            const timer = setTimeout(() => reject(new Error('證明聯載入逾時')), 20000);
+            frame.onload = async () => {
+                try {
+                    const doc = frame.contentDocument;
+                    await Promise.all([...doc.images].map(img => img.complete ? null
+                        : new Promise(r => { img.onload = img.onerror = r; })));
+                    await new Promise(r => setTimeout(r, 600));   // 讓 QR Code 畫完
+                    clearTimeout(timer);
+                    frame.contentWindow.focus();
+                    frame.contentWindow.print();   // Chrome 加 --kiosk-printing 時會直接印到預設印表機
+                    resolve();
+                } catch (e) { clearTimeout(timer); reject(e); }
+            };
+            frame.srcdoc = html;
+        });
+    }
+
+    async function poll() {
+        if (paused || busy || !device) return;
+        busy = true;
+        try {
+            const { data: jobs } = await api('/api/print/queue');
+            setState('on', '列印站運作中', `${esc(device.name)}（${device.store === '高雄' ? '高雄總部' : esc(device.store) + '門市'}）・最後檢查 ${timeNow()}`);
+            for (const job of jobs) {
+                if (paused) break;
+                try {
+                    const { data } = await api(`/api/print/invoice/${job.id}`);
+                    await printHtml(data.html);
+                    await api('/api/print/done', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: job.id }) });
+                    addLog(true, `發票 ${job.invoice_no}　NT$${Number(job.amount).toLocaleString()}${job.reprint ? '（補印）' : ''}`);
+                } catch (e) {
+                    addLog(false, `發票 ${job.invoice_no} 列印失敗：${e.message}（會自動再試）`);
+                    break;   // 先停一輪，下次再試
+                }
+            }
+        } catch (e) {
+            setState('err', '連不上 POS', `${esc(e.message)}・會自動重試（${timeNow()}）`);
+        } finally {
+            busy = false;
+        }
+    }
+
+    function togglePause() {
+        paused = !paused;
+        $('pauseBtn').textContent = paused ? '▶ 繼續列印' : '⏸ 暫停列印';
+        if (paused) setState('', '已暫停', '按「繼續列印」恢復。暫停期間開的發票，繼續後會補印。');
+        else poll();
+    }
+
+    // 測試頁：確認發票機接好、紙寬對不對
+    function testPrint() {
+        printHtml(`<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
+            @page { size: 57mm auto; margin: 0; } body { width: 52mm; margin: 0 auto; font-family: sans-serif; font-size: 12px; }
+            h2 { text-align: center; font-size: 16px; margin: 6px 0; } .box { border: 1px dashed #000; padding: 6px; margin: 6px 0; text-align: center; }
+        </style></head><body><h2>野烏金 列印測試</h2><div class="box">如果這段字完整、沒有被切掉<br>代表紙寬設定正確</div>
+        <div>時間：${new Date().toLocaleString('zh-TW', { hour12: false })}</div><div>裝置：${esc(device ? device.name : '')}</div><br></body></html>`)
+            .then(() => addLog(true, '測試頁'))
+            .catch(e => addLog(false, '測試頁失敗：' + e.message));
+    }
+
+    async function start() {
+        if (!token) {
+            return setState('err', '這台電腦還沒登記',
+                '請先用 Chrome 打開 <a href="/">POS 前台</a>，登記這台電腦（例如「櫃檯電腦」），再回到這一頁。');
+        }
+        try {
+            const res = await fetch(`/api/punch-device?token=${encodeURIComponent(token)}`);
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.message);
+            device = data.data;
+        } catch (e) {
+            return setState('err', '這台電腦還沒登記', `${esc(e.message)}。請先用 Chrome 打開 <a href="/">POS 前台</a> 登記這台電腦。`);
+        }
+        try {
+            const cfg = await api('/api/invoice/config');
+            if (!cfg.data.enabled) return setState('err', '發票功能還沒啟用', '要先在 Railway 設定綠界的特店編號和金鑰。');
+        } catch (e) { /* 等一下 poll 會再顯示連線問題 */ }
+        poll();
+        setInterval(poll, POLL_MS);
+    }
+    start();
+</script>
+</body>
+</html>
