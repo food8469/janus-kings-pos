@@ -4,6 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>野烏金 POS - 發票列印站</title>
+<!-- 重新畫清楚的 QR Code 用 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
 <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { font-family: "Microsoft JhengHei", "PingFang TC", sans-serif; background: #f4f5f8; color: #333; padding: 20px; }
@@ -104,8 +106,14 @@
             ul.print { margin: 0 !important; padding: 0 !important; }
             ul.print li { margin: 0 !important; list-style: none; }
             ul.print > br, ul.print > p { display: none !important; }
-            .invoiceContainer .invoice_inner .invoice, .invoiceContainer .invoice_inner .invoice_details { border: 0 !important; }`;
+            .invoiceContainer .invoice_inner .invoice, .invoiceContainer .invoice_inner .invoice_details { border: 0 !important; }
+            .invoiceContainer .invoice_inner .invoice { height: auto !important; min-height: 9cm; }
+            table.img_stuff { margin-left: auto !important; margin-right: auto !important; }`;
         doc.head.appendChild(style);
+        // 沒有備註時，連「備註」兩個字也不要印
+        for (const el of doc.querySelectorAll('h4, p')) {
+            if (el.textContent.replace(/\s/g, '') === '備註') el.style.display = 'none';
+        }
         // 內容實際的寬度：看得到的字、條碼、QR Code 最右邊在哪（字太大超出框框的也算進去；外框不算）
         let width = 0;
         const range = doc.createRange();
@@ -122,10 +130,57 @@
         }
         const zoom = Math.min(1, (PAPER_MM * MM) / (width || doc.body.scrollWidth));
         doc.body.style.zoom = zoom;
+        try { sharpenQr(doc, zoom); } catch (e) { /* 畫不出來就用綠界原本的 QR Code */ }
         const page = doc.createElement('style');
         page.textContent = '@page { margin: 0; }';   // 不留邊，Chrome 也就不會印日期、網址
         doc.head.appendChild(page);
         return { width, zoom };
+    }
+
+    // 綠界的 QR Code 縮小後每格不到 3 個印點、格子大小不一，手機不好掃。
+    // 用綠界給的同一段內容重新畫：每一格剛好 2～4 個印點（203 dpi），盡量畫大，印出來格子整齊
+    const DOT_MM = 25.4 / 203;
+    function sharpenQr(doc, zoom) {
+        if (typeof qrcode !== 'function') return;
+        qrcode.stringToBytes = qrcode.stringToBytesFuncs['UTF-8'];   // 發票 QR Code 的中文用 UTF-8
+        const make = (text) => { const q = qrcode(0, 'L'); q.addData(text, 'Byte'); q.make(); return q; };
+        for (const left of doc.querySelectorAll('[id^="QRCode_Left"]')) {
+            const i = left.id.slice('QRCode_Left'.length);
+            const right = doc.getElementById('QRCode_Right' + i);
+            const lv = doc.getElementById('QRCode_L_Value' + i)?.value;
+            const rv = doc.getElementById('QRCode_R_Value' + i)?.value;
+            if (!right || !lv || !rv) continue;
+            const ql = make(lv), qr = make(rv);
+            const nl = ql.getModuleCount(), nr = qr.getModuleCount();
+            // 兩個 QR Code 要左右並排：同一層的放進一個並排的框，不會因為太寬被擠到下一行
+            if (left.parentElement === right.parentElement) {
+                const row = doc.createElement('div');
+                row.style.cssText = 'display:flex;justify-content:center;align-items:flex-start;';
+                left.before(row);
+                row.append(left, right);
+            }
+            // 兩個 QR Code 加中間空隙要放得進可用的寬度：左邊（資料多）先決定，右邊用剩下的空間、不超過左邊大小
+            const boxMm = (left.closest('.invoice, .fapiau') || doc.body).getBoundingClientRect().width / MM;
+            const room = Math.min(PAPER_MM, boxMm || PAPER_MM) - 5;
+            const dotsL = Math.max(2, Math.min(4, Math.floor(room / ((nl + nr) * DOT_MM))));
+            const sizeL = nl * dotsL * DOT_MM;
+            const dotsR = Math.max(2, Math.floor(Math.min(sizeL, room - sizeL) / (nr * DOT_MM)));
+            for (const [el, q, dots] of [[left, ql, dotsL], [right, qr, dotsR]]) {
+                const n = q.getModuleCount(), px = 8;
+                const canvas = doc.createElement('canvas');
+                canvas.width = canvas.height = n * px;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = '#fff';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+                ctx.fillStyle = '#000';
+                for (let r = 0; r < n; r++) for (let c = 0; c < n; c++) if (q.isDark(r, c)) ctx.fillRect(c * px, r * px, px, px);
+                const size = n * dots * DOT_MM / zoom;   // 整張有縮小，這裡要先放大回來
+                canvas.style.cssText = `width:${size}mm;height:${size}mm;image-rendering:pixelated;display:block;`;
+                el.innerHTML = '';
+                el.appendChild(canvas);
+                el.style.cssText = `width:${size}mm;height:${size}mm;display:inline-block;vertical-align:top;flex:none;margin:${1 / zoom}mm ${1 / zoom}mm 0;`;
+            }
+        }
     }
 
     // 把 HTML 放進隱藏的 iframe 印出來；等圖片（QR Code、條碼）都載入完才印

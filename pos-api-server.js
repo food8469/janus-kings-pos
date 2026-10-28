@@ -846,7 +846,7 @@ async function issueInvoice(orderNo, { kind, carrier, taxId }, relateNumber = or
       CarrierNum: kind === 'carrier' ? carrier : '',
       TaxType: '1',
       SalesAmount: amount,
-      InvoiceRemark: `${storeName(store)}銷售`,
+      InvoiceRemark: '',
       InvType: '07',
       vat: '1',
       Items: invoiceItems(sales),
