@@ -294,6 +294,8 @@ async function initDb() {
     CREATE INDEX IF NOT EXISTS invoices_order_no_idx ON invoices (order_no);
     -- 誰作廢或改開的（前台是當下的銷售員，後台寫「後台」）
     ALTER TABLE invoices ADD COLUMN IF NOT EXISTS operator TEXT;
+    -- 補印：列印站下次印的時候要標「補印」
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS reprint BOOLEAN NOT NULL DEFAULT FALSE;
   `);
   // 員工名單是空的才放入預設人員（之後在後台管理）
   const { rows: [{ count }] } = await pool.query('SELECT COUNT(*)::int AS count FROM staff');
@@ -366,6 +368,8 @@ const sendPage = (file) => (req, res) => {
 };
 app.get('/', sendPage('pos-checkout.html'));
 app.get('/admin', requireAdmin, sendPage('pos-admin.html'));
+// 列印站：櫃檯電腦一直開著，自動印發票證明聯
+app.get('/print-station', sendPage('pos-print.html'));
 
 // App 設定檔與圖示（加到主畫面用）
 app.get(/^\/(manifest-(pos|admin)\.webmanifest|icon-(pos|admin)-(180|192|512)\.png)$/, (req, res) => {
@@ -906,6 +910,63 @@ app.post('/api/invoice/check-carrier', requireDevice, async (req, res) => {
 });
 
 // 前台：結帳完開發票（交易已經存好；發票開失敗也不影響交易，後台可以補開）
+// ---- 列印站（櫃檯電腦）：要印紙本的發票排隊，列印站每幾秒來拿，印完回報 ----
+// 待印：這家門市、已開立、要印紙本、還沒印過（或按了補印）、兩天內開的（避免很舊的突然被印出來）
+app.get('/api/print/queue', requireDevice, async (req, res) => {
+  const store = req.device ? req.device.store : req.query.store;
+  const { rows } = await pool.query(
+    `SELECT id, invoice_no, amount, kind, tax_id, reprint, created_at FROM invoices
+     WHERE store = $1 AND status = 'issued' AND print_flag AND printed_at IS NULL
+       AND (created_at > NOW() - INTERVAL '2 days' OR reprint)
+     ORDER BY id LIMIT 5`, [store]);
+  res.json({ status: 'success', data: rows });
+});
+
+// 向綠界拿這張發票的證明聯（熱感紙格式），回傳 HTML 給列印站印
+app.get('/api/print/invoice/:id', requireDevice, async (req, res) => {
+  if (!invoiceEnabled()) return res.status(400).json({ status: 'error', message: '發票功能未啟用' });
+  const { rows: [inv] } = await pool.query('SELECT * FROM invoices WHERE id = $1', [toInt(req.params.id, '發票')]);
+  if (!inv || inv.status !== 'issued') return res.status(404).json({ status: 'error', message: '找不到這張發票' });
+  if (req.device && inv.store !== req.device.store) return res.status(403).json({ status: 'error', message: '不是這家門市的發票' });
+  const r = await ecpayCall('InvoicePrint', {
+    InvoiceNo: inv.invoice_no,
+    InvoiceDate: String(inv.invoice_date).slice(0, 10).replace(/\//g, '-'),
+    PrintStyle: 3,                                // 熱感紙
+    IsShowingDetail: 1,                           // 印出品項明細
+    ...(inv.reprint ? { IsReprintInvoice: 'Y' } : {}),
+  });
+  if (Number(r.RtnCode) !== 1 || !r.InvoiceHtml) {
+    return res.status(400).json({ status: 'error', message: `綠界列印失敗：${r.RtnMsg || r.RtnCode}` });
+  }
+  // 綠界給的是一個網址（1 小時內有效）。抓回來加上 <base>，列印站才能直接列印（圖片、樣式照樣從綠界讀）
+  const page = await fetch(r.InvoiceHtml, { signal: AbortSignal.timeout(15000) });
+  if (!page.ok) return res.status(400).json({ status: 'error', message: `綠界列印頁面讀取失敗（HTTP ${page.status}）` });
+  let html = await page.text();
+  const base = `<base href="${String(r.InvoiceHtml).replace(/"/g, '&quot;')}">`;
+  html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => `${m}${base}`) : base + html;
+  res.json({ status: 'success', data: { id: inv.id, invoice_no: inv.invoice_no, html } });
+});
+
+// 列印站印完回報
+app.post('/api/print/done', requireDevice, async (req, res) => {
+  const id = toInt(req.body?.id, '發票');
+  const store = req.device ? req.device.store : null;
+  await pool.query(
+    `UPDATE invoices SET printed_at = NOW(), reprint = FALSE WHERE id = $1 ${store ? 'AND store = $2' : ''}`,
+    store ? [id, store] : [id]);
+  res.json({ status: 'success' });
+});
+
+// 前台結帳紀錄：補印（卡紙、沒印到）→ 重新排進列印站，證明聯會標「補印」
+app.post('/api/invoice/reprint', requireDevice, async (req, res) => {
+  const { rows: [inv] } = await pool.query('SELECT * FROM invoices WHERE id = $1', [toInt(req.body?.id, '發票')]);
+  if (!inv || inv.status !== 'issued') return res.status(400).json({ status: 'error', message: '只有已開立的發票可以補印' });
+  if (!inv.print_flag) return res.status(400).json({ status: 'error', message: '這張發票存在手機條碼，不能印紙本' });
+  if (req.device && inv.store !== req.device.store) return res.status(403).json({ status: 'error', message: '不是這家門市的發票' });
+  await pool.query('UPDATE invoices SET printed_at = NULL, reprint = TRUE WHERE id = $1', [inv.id]);
+  res.json({ status: 'success', message: `發票 ${inv.invoice_no} 已送到列印站補印` });
+});
+
 app.post('/api/invoice/issue', requireDevice, async (req, res) => {
   if (!invoiceEnabled()) return res.status(400).json({ status: 'error', message: '發票功能未啟用' });
   const orderNo = String(req.body?.order_no || '').slice(0, 40);

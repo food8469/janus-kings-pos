@@ -2245,6 +2245,21 @@
             }
         });
 
+        // 補印證明聯（卡紙、沒印到）：送到櫃檯電腦的列印站重印，證明聯會標「補印」
+        async function reprintInvoice(id, no) {
+            if (!confirm(`要補印發票 ${no} 的證明聯嗎？`)) return;
+            try {
+                const res = await posFetch('/api/invoice/reprint', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id })
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(data.message || res.status);
+                showMessage(`✓ ${data.message}`, 'success');
+            } catch (error) {
+                showMessage('補印失敗：' + error.message, 'error');
+            }
+        }
+
         // 結帳紀錄上發票類型的文字：一般／手機條碼 /ABC1234／統編 12345678
         function invoiceKindText(o) {
             if (o.invoiceKind === 'carrier') return `手機條碼 ${o.invoiceCarrier || ''}`;
@@ -2364,7 +2379,7 @@
                 const inv = data.data;
                 if (inv.skipped) return { ok: true, text: '' };
                 if (inv.status !== 'issued') return { ok: false, text: `⚠️ 發票開立失敗：${inv.error || ''}，請到後台發票紀錄補開` };
-                return { ok: true, text: `🧾 發票 ${inv.invoice_no}${inv.print_flag ? '' : '（已存入手機條碼）'}` };
+                return { ok: true, text: `🧾 發票 ${inv.invoice_no}${inv.print_flag ? '（證明聯列印中）' : '（已存入手機條碼）'}` };
             } catch (e) {
                 return { ok: false, text: '⚠️ 發票開立時網路中斷，請到後台發票紀錄確認或補開' };
             }
@@ -3366,7 +3381,8 @@
                                 : o.invoiceStatus === 'void' ? `🧾 發票 ${esc(o.invoiceNo || '')} 已作廢`
                                 : o.invoiceStatus === 'failed' ? '⚠️ 發票開立失敗' : '🧾 沒有開發票'}</span>
                             <span class="order-inv-btns">${o.invoiceStatus === 'issued'
-                                ? `<button onclick="openReissue('${esc(o.no)}', 'reissue', '${esc(o.invoiceNo)}', ${o.invoiceId})">改開發票</button>
+                                ? `${o.invoiceKind !== 'carrier' ? `<button onclick="reprintInvoice(${o.invoiceId}, '${esc(o.invoiceNo)}')">補印</button>` : ''}
+                                   <button onclick="openReissue('${esc(o.no)}', 'reissue', '${esc(o.invoiceNo)}', ${o.invoiceId})">改開發票</button>
                                    <button class="danger" onclick="openReissue('${esc(o.no)}', 'void', '${esc(o.invoiceNo)}', ${o.invoiceId})">作廢發票</button>`
                                 : `<button onclick="openReissue('${esc(o.no)}', 'reissue', '', null)">${o.invoiceStatus ? '重新開立' : '開立發票'}</button>`}</span>
                         </div>
