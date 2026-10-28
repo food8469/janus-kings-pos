@@ -88,12 +88,13 @@
         return data;
     }
 
-    // 5.7 公分的發票紙，熱感機實際只印得到中間 4.8 公分
-    const PAPER_MM = 48;
+    // 5.7 公分的發票紙，熱感機實際只印得到中間 4.8 公分；縮到 4.6 公分，左右留一點空間
+    const PAPER_MM = 46;
     const MM = 96 / 25.4;   // 1mm 幾個 px
 
-    // 綠界的證明聯是 5.7cm 寬、放在 680px 的表格裡，最後還有換頁：
-    // 拿掉多餘的格子和換頁，整張等比例縮到 4.8cm，紙長剛好等於內容（不會一直吐白紙）
+    // 綠界的證明聯是 5.7cm 寬（一般版放在 680px 的表格裡，最後還有換頁；補印版是另一種版面）：
+    // 拿掉多餘的格子和換頁，照內容實際寬度等比例縮小。
+    // 不指定紙長：從紙的最上面開始印，印完發票機自己切紙（指定紙長的話 Chrome 會把內容放到整捲紙的中間）
     function fitReceipt(doc) {
         const style = doc.createElement('style');
         style.textContent = `
@@ -105,14 +106,26 @@
             ul.print > br, ul.print > p { display: none !important; }
             .invoiceContainer .invoice_inner .invoice, .invoiceContainer .invoice_inner .invoice_details { border: 0 !important; }`;
         doc.head.appendChild(style);
-        const box = doc.querySelector('.invoiceContainer') || doc.body;
-        const rect = box.getBoundingClientRect();
-        const zoom = Math.min(1, (PAPER_MM * MM) / rect.width);
+        // 內容實際的寬度：看得到的字、條碼、QR Code 最右邊在哪（字太大超出框框的也算進去；外框不算）
+        let width = 0;
+        const range = doc.createRange();
+        const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+        while (walker.nextNode()) {
+            if (!walker.currentNode.textContent.trim()) continue;
+            range.selectNodeContents(walker.currentNode);
+            for (const r of range.getClientRects()) width = Math.max(width, r.right);
+        }
+        for (const el of doc.body.querySelectorAll('*')) {
+            if (el.children.length) continue;   // 只看最裡層（條碼的線條、QR Code 的格子）
+            const r = el.getBoundingClientRect();
+            if (r.width && r.height) width = Math.max(width, r.right);
+        }
+        const zoom = Math.min(1, (PAPER_MM * MM) / (width || doc.body.scrollWidth));
         doc.body.style.zoom = zoom;
-        const heightMm = Math.ceil(rect.height * zoom / MM) + 4;
         const page = doc.createElement('style');
-        page.textContent = `@page { size: ${PAPER_MM}mm ${heightMm}mm; margin: 0; }`;
+        page.textContent = '@page { margin: 0; }';   // 不留邊，Chrome 也就不會印日期、網址
         doc.head.appendChild(page);
+        return { width, zoom };
     }
 
     // 把 HTML 放進隱藏的 iframe 印出來；等圖片（QR Code、條碼）都載入完才印
@@ -172,7 +185,7 @@
     // 測試頁：確認發票機接好、紙寬對不對
     function testPrint() {
         printHtml(`<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
-            @page { size: 48mm 40mm; margin: 0; } body { width: 46mm; margin: 0 auto; font-family: sans-serif; font-size: 12px; }
+            @page { margin: 0; } body { width: 46mm; margin: 0 auto; font-family: sans-serif; font-size: 12px; }
             h2 { text-align: center; font-size: 16px; margin: 6px 0; } .box { border: 1px dashed #000; padding: 6px; margin: 6px 0; text-align: center; }
         </style></head><body><h2>野烏金 列印測試</h2><div class="box">如果這段字完整、沒有被切掉<br>代表紙寬設定正確</div>
         <div>時間：${new Date().toLocaleString('zh-TW', { hour12: false })}</div><div>裝置：${esc(device ? device.name : '')}</div><br></body></html>`)
