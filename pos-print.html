@@ -88,8 +88,35 @@
         return data;
     }
 
+    // 5.7 公分的發票紙，熱感機實際只印得到中間 4.8 公分
+    const PAPER_MM = 48;
+    const MM = 96 / 25.4;   // 1mm 幾個 px
+
+    // 綠界的證明聯是 5.7cm 寬、放在 680px 的表格裡，最後還有換頁：
+    // 拿掉多餘的格子和換頁，整張等比例縮到 4.8cm，紙長剛好等於內容（不會一直吐白紙）
+    function fitReceipt(doc) {
+        const style = doc.createElement('style');
+        style.textContent = `
+            html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
+            #print table[width] { width: auto !important; margin: 0 !important; }
+            #print table[width] > tbody > tr > td ~ td { display: none !important; }
+            ul.print { margin: 0 !important; padding: 0 !important; }
+            ul.print li { margin: 0 !important; list-style: none; }
+            ul.print > br, ul.print > p { display: none !important; }
+            .invoiceContainer .invoice_inner .invoice, .invoiceContainer .invoice_inner .invoice_details { border: 0 !important; }`;
+        doc.head.appendChild(style);
+        const box = doc.querySelector('.invoiceContainer') || doc.body;
+        const rect = box.getBoundingClientRect();
+        const zoom = Math.min(1, (PAPER_MM * MM) / rect.width);
+        doc.body.style.zoom = zoom;
+        const heightMm = Math.ceil(rect.height * zoom / MM) + 4;
+        const page = doc.createElement('style');
+        page.textContent = `@page { size: ${PAPER_MM}mm ${heightMm}mm; margin: 0; }`;
+        doc.head.appendChild(page);
+    }
+
     // 把 HTML 放進隱藏的 iframe 印出來；等圖片（QR Code、條碼）都載入完才印
-    function printHtml(html) {
+    function printHtml(html, fit = false) {
         return new Promise((resolve, reject) => {
             const frame = $('frame');
             const timer = setTimeout(() => reject(new Error('證明聯載入逾時')), 20000);
@@ -99,6 +126,7 @@
                     await Promise.all([...doc.images].map(img => img.complete ? null
                         : new Promise(r => { img.onload = img.onerror = r; })));
                     await new Promise(r => setTimeout(r, 600));   // 讓 QR Code 畫完
+                    if (fit) fitReceipt(doc);
                     clearTimeout(timer);
                     frame.contentWindow.focus();
                     frame.contentWindow.print();   // Chrome 加 --kiosk-printing 時會直接印到預設印表機
@@ -119,7 +147,7 @@
                 if (paused) break;
                 try {
                     const { data } = await api(`/api/print/invoice/${job.id}`);
-                    await printHtml(data.html);
+                    await printHtml(data.html, true);
                     await api('/api/print/done', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: job.id }) });
                     addLog(true, `發票 ${job.invoice_no}　NT$${Number(job.amount).toLocaleString()}${job.reprint ? '（補印）' : ''}`);
                 } catch (e) {
@@ -144,7 +172,7 @@
     // 測試頁：確認發票機接好、紙寬對不對
     function testPrint() {
         printHtml(`<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
-            @page { size: 57mm auto; margin: 0; } body { width: 52mm; margin: 0 auto; font-family: sans-serif; font-size: 12px; }
+            @page { size: 48mm 40mm; margin: 0; } body { width: 46mm; margin: 0 auto; font-family: sans-serif; font-size: 12px; }
             h2 { text-align: center; font-size: 16px; margin: 6px 0; } .box { border: 1px dashed #000; padding: 6px; margin: 6px 0; text-align: center; }
         </style></head><body><h2>野烏金 列印測試</h2><div class="box">如果這段字完整、沒有被切掉<br>代表紙寬設定正確</div>
         <div>時間：${new Date().toLocaleString('zh-TW', { hour12: false })}</div><div>裝置：${esc(device ? device.name : '')}</div><br></body></html>`)
