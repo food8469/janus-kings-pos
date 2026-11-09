@@ -63,7 +63,7 @@
 <script>
     const DEVICE_KEY = 'pos_punch_device';   // 跟前台共用同一個裝置登記
     const token = (() => { try { return localStorage.getItem(DEVICE_KEY); } catch (e) { return null; } })();
-    const POLL_MS = 3000;
+    const POLL_MS = 1000;
     let paused = false, busy = false, device = null;
     const logs = [];
 
@@ -193,7 +193,7 @@
                     const doc = frame.contentDocument;
                     await Promise.all([...doc.images].map(img => img.complete ? null
                         : new Promise(r => { img.onload = img.onerror = r; })));
-                    await new Promise(r => setTimeout(r, 600));   // 讓 QR Code 畫完
+                    await new Promise(r => setTimeout(r, 300));   // 讓 QR Code 畫完
                     if (fit) fitReceipt(doc);
                     clearTimeout(timer);
                     frame.contentWindow.focus();
