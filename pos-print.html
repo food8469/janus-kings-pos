@@ -97,6 +97,35 @@
     // 綠界的證明聯是 5.7cm 寬（一般版放在 680px 的表格裡，最後還有換頁；補印版是另一種版面）：
     // 拿掉多餘的格子和換頁，照內容實際寬度等比例縮小。
     // 不指定紙長：從紙的最上面開始印，印完發票機自己切紙（指定紙長的話 Chrome 會把內容放到整捲紙的中間）
+    // 店名太長時綠界會折成兩行：改成一行，放不下就把字縮小到剛好
+    function oneLineStoreTitle(doc) {
+        let el = doc.querySelector('.store_title');
+        if (!el) {   // 別的版面：找「電子發票證明聯」上面那一行
+            const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+            let prev = null;
+            while (walker.nextNode()) {
+                const t = walker.currentNode;
+                if (!t.textContent.trim()) continue;
+                if (t.textContent.includes('電子發票證明聯')) break;
+                prev = t;
+            }
+            el = prev && prev.parentElement;
+        }
+        if (!el || el.querySelector('img')) return;
+        const win = doc.defaultView;
+        const box = el.parentElement;
+        const bs = win.getComputedStyle(box);
+        const room = box.clientWidth - parseFloat(bs.paddingLeft) - parseFloat(bs.paddingRight);
+        el.style.whiteSpace = 'nowrap';
+        const range = doc.createRange();
+        range.selectNodeContents(el);
+        let size = parseFloat(win.getComputedStyle(el).fontSize);
+        while (range.getBoundingClientRect().width > room && size > 10) {
+            size -= 0.5;
+            el.style.setProperty('font-size', size + 'px', 'important');
+        }
+    }
+
     function fitReceipt(doc) {
         const style = doc.createElement('style');
         style.textContent = `
@@ -110,6 +139,7 @@
             .invoiceContainer .invoice_inner .invoice { height: auto !important; min-height: 9cm; }
             table.img_stuff { margin-left: auto !important; margin-right: auto !important; }`;
         doc.head.appendChild(style);
+        try { oneLineStoreTitle(doc); } catch (e) { /* 改不了就照綠界原本的樣子 */ }
         // 沒有備註時，連「備註」兩個字也不要印
         for (const el of doc.querySelectorAll('h4, p')) {
             if (el.textContent.replace(/\s/g, '') === '備註') el.style.display = 'none';

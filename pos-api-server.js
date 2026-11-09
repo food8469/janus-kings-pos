@@ -296,6 +296,8 @@ async function initDb() {
     ALTER TABLE invoices ADD COLUMN IF NOT EXISTS operator TEXT;
     -- 補印：列印站下次印的時候要標「補印」
     ALTER TABLE invoices ADD COLUMN IF NOT EXISTS reprint BOOLEAN NOT NULL DEFAULT FALSE;
+    -- 作廢原因（跟送給綠界的一樣）
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS void_reason TEXT;
   `);
   // 員工名單是空的才放入預設人員（之後在後台管理）
   const { rows: [{ count }] } = await pool.query('SELECT COUNT(*)::int AS count FROM staff');
@@ -718,6 +720,7 @@ function toRecord(r) {
     invoice_kind: r.invoice_kind || null,
     invoice_carrier: r.invoice_carrier || null,
     invoice_tax_id: r.invoice_tax_id || null,
+    invoice_void_reason: r.invoice_void_reason || null,
     invoice_voided: r.invoice_voided ? r.invoice_voided.split(',') : [],   // 這張單作廢過的發票號碼
   };
 }
@@ -861,12 +864,13 @@ async function issueInvoice(orderNo, { kind, carrier, taxId }, relateNumber = or
 
 // 作廢一張已開立的發票
 async function voidInvoice(inv, reason, operator = '後台') {
+  const why = String(reason || '交易修改').slice(0, 20);
   const result = await ecpayCall('Invalid', {
     InvoiceNo: inv.invoice_no, InvoiceDate: String(inv.invoice_date).slice(0, 10).replace(/\//g, '-'),
-    Reason: String(reason || '交易修改').slice(0, 20),
+    Reason: why,
   });
   if (Number(result.RtnCode) !== 1) throw new Error(result.RtnMsg || `作廢失敗（${result.RtnCode}）`);
-  await pool.query(`UPDATE invoices SET status = 'void', voided_at = NOW(), operator = $2 WHERE id = $1`, [inv.id, operator]);
+  await pool.query(`UPDATE invoices SET status = 'void', voided_at = NOW(), operator = $2, void_reason = $3 WHERE id = $1`, [inv.id, operator, why]);
 }
 
 // 後台修改或刪除交易後：這張單的發票金額對不上了 → 作廢舊的，剩下的品項重開一張（同樣的發票類型）
@@ -1075,7 +1079,7 @@ app.post('/api/admin/invoices/void', requireAdmin, async (req, res) => {
 // 每筆銷售帶上這張單最新的發票（號碼、狀態）
 const INVOICE_JOIN = `LEFT JOIN LATERAL (
   SELECT id AS invoice_id, invoice_no, status AS invoice_status, kind AS invoice_kind, carrier AS invoice_carrier,
-         tax_id AS invoice_tax_id
+         tax_id AS invoice_tax_id, void_reason AS invoice_void_reason
   FROM invoices WHERE invoices.order_no = sales.order_no ORDER BY id DESC LIMIT 1
 ) inv ON TRUE
 LEFT JOIN LATERAL (
