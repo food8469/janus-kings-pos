@@ -70,6 +70,9 @@
         button.quick-range { background: white; color: #555; border: 1px solid #ddd; padding: 6px 12px; }
         button.quick-range:hover { border-color: #667eea; color: #667eea; }
         tr.editing-sale td { background: #fff9db; }
+        #salesTable tr.order-first td { border-top: 2px solid #ced4da; }
+        #salesTable tr.order-more td, #salesTable tr.order-sum td { border-top: 1px dashed #e9ecef; }
+        #salesTable tr.order-sum td { background: #f8f9fa; padding-top: 6px; padding-bottom: 6px; }
         tr.editing-sale input, tr.editing-sale select { padding: 5px; font-size: 13px; }
         button.row-btn { padding: 5px 10px; font-size: 13px; margin-right: 4px; }
         tr.detail-row > td { background: #f8f9ff; padding: 12px 15px; }
@@ -2468,6 +2471,7 @@
 
         // ============ 交易紀錄：日期、篩選、編輯、匯入匯出 ============
         let salesRows = [];
+        let salesGroups = [];   // 交易紀錄畫面上依單號分好的組
         let salesStaffNames = [];
         const MAX_SALES_ROWS = 500;   // 畫面最多顯示筆數（匯出不受限制）
 
@@ -2543,7 +2547,23 @@
             list.forEach(r => { const k = r.payment_method || '未記錄'; byPay[k] = (byPay[k] || 0) + r.total; });
             document.getElementById('salesByPayment').textContent = Object.entries(byPay).map(([k, v]) => `${k} NT$${v.toLocaleString()}`).join('　｜　');
 
-            document.querySelector('#salesTable tbody').innerHTML = list.slice(0, MAX_SALES_ROWS).map(saleRowHtml).join('')
+            // 同一筆結帳（同單號）的品項排在一起：第一列寫時間、員工、付款，多樣商品再加一列合計
+            salesGroups = [];
+            const byOrder = {};
+            list.slice(0, MAX_SALES_ROWS).forEach(r => {
+                const key = r.order_no || `#${r.id}`;
+                if (!byOrder[key]) salesGroups.push(byOrder[key] = []);
+                byOrder[key].push(r);
+            });
+            document.querySelector('#salesTable tbody').innerHTML = salesGroups.map((g, gi) =>
+                g.map((r, i) => saleRowHtml(r, i === 0)).join('') + (g.length > 1 ? `
+                <tr class="order-sum">
+                    <td colspan="5" style="text-align:right; color:#868e96;">這筆共 ${g.length} 樣</td>
+                    <td>${g.reduce((s, r) => s + r.quantity, 0)}</td>
+                    <td><b>NT$${g.reduce((s, r) => s + r.total, 0).toLocaleString()}</b></td>
+                    <td></td>
+                    <td><button class="row-btn danger" onclick="deleteSaleOrder(${gi})">🗑️ 整筆</button></td>
+                </tr>` : '')).join('')
                 || '<tr><td colspan="9" style="color:#999">這段期間沒有交易紀錄</td></tr>';
             document.getElementById('salesNote').textContent = list.length > MAX_SALES_ROWS
                 ? `共 ${list.length} 筆，畫面只顯示最新 ${MAX_SALES_ROWS} 筆，請縮小日期範圍；「匯出」會包含全部 ${list.length} 筆。` : '';
@@ -2557,17 +2577,18 @@
             return `<br><small style="color:${voided ? '#adb5bd' : '#2b8a3e'};${voided ? 'text-decoration:line-through;' : ''}">🧾 ${escHtml(r.invoice_no || '')}</small>`;
         }
 
-        function saleRowHtml(r) {
+        // first：這筆結帳的第一樣商品才寫時間、門市、員工、顧客、付款；後面的品項留白
+        function saleRowHtml(r, first = true) {
             return `
-                <tr data-sale="${r.id}">
-                    <td>${twDateTime(r.timestamp)}</td>
-                    <td>${escHtml(r.store)}</td>
-                    <td>${escHtml(r.staff)}</td>
-                    <td>${escHtml(r.customer_name || '')}</td>
+                <tr data-sale="${r.id}" class="${first ? 'order-first' : 'order-more'}">
+                    <td>${first ? twDateTime(r.timestamp) : ''}</td>
+                    <td>${first ? escHtml(r.store) : ''}</td>
+                    <td>${first ? escHtml(r.staff) : ''}</td>
+                    <td>${first ? escHtml(r.customer_name || '') : ''}</td>
                     <td>${escHtml(r.product_name)}</td>
                     <td>${r.quantity}</td>
                     <td>NT$${r.total.toLocaleString()}${r.discount ? `<br><small style="color:#e03131">折 ${r.discount}</small>` : ''}</td>
-                    <td>${escHtml(r.payment_method || '')}${r.tax_id ? `<br><small>統編 ${escHtml(r.tax_id)}</small>` : ''}${invoiceTag(r)}</td>
+                    <td>${first ? `${escHtml(r.payment_method || '')}${r.tax_id ? `<br><small>統編 ${escHtml(r.tax_id)}</small>` : ''}${invoiceTag(r)}` : ''}</td>
                     <td style="white-space: nowrap;">
                         <button class="row-btn" onclick="editSaleRow(${r.id})">✏️</button>
                         <button class="row-btn danger" onclick="deleteSaleRow(${r.id})">🗑️</button>
@@ -2610,6 +2631,22 @@
                 loadSalesRecords();
             } catch (error) {
                 alert('保存失敗: ' + error.message);
+            }
+        }
+
+        // 刪除整筆結帳（這筆的所有品項）
+        async function deleteSaleOrder(gi) {
+            const g = salesGroups[gi];
+            if (!g) return;
+            const total = g.reduce((s, r) => s + r.total, 0);
+            const items = g.map(r => `${r.product_name} × ${r.quantity}`).join('\n');
+            if (!confirm(`確定要刪除這整筆結帳？\n\n${twDateTime(g[0].timestamp)}　共 NT$${total.toLocaleString()}\n${items}\n\n刪除後無法復原，商品會加回庫存，有開發票的話會自動作廢。`)) return;
+            try {
+                const r = await postJson('/api/admin/sales/delete', { ids: g.map(r => r.id) });
+                if (r && r.message) alert(r.message);
+                loadSalesRecords();
+            } catch (error) {
+                alert('刪除失敗: ' + error.message);
             }
         }
 
