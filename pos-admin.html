@@ -71,8 +71,12 @@
         button.quick-range:hover { border-color: #667eea; color: #667eea; }
         tr.editing-sale td { background: #fff9db; }
         #salesTable tr.order-first td { border-top: 2px solid #ced4da; }
-        #salesTable tr.order-more td, #salesTable tr.order-sum td { border-top: 1px dashed #e9ecef; }
-        #salesTable tr.order-sum td { background: #f8f9fa; padding-top: 6px; padding-bottom: 6px; }
+        #salesTable tr.order-head { cursor: pointer; }
+        #salesTable tr.order-head:hover td { background: #f3f0ff; }
+        #salesTable .order-arrow { display: inline-block; width: 14px; color: #667eea; }
+        #salesTable .order-more-count { color: #667eea; font-size: 12px; white-space: nowrap; }
+        #salesTable tr.order-more td { border-top: 1px dashed #e9ecef; background: #fafbfc; font-size: 13px; }
+        #salesTable .order-indent { color: #adb5bd; margin-left: 14px; }
         tr.editing-sale input, tr.editing-sale select { padding: 5px; font-size: 13px; }
         button.row-btn { padding: 5px 10px; font-size: 13px; margin-right: 4px; }
         tr.detail-row > td { background: #f8f9ff; padding: 12px 15px; }
@@ -2472,6 +2476,7 @@
         // ============ 交易紀錄：日期、篩選、編輯、匯入匯出 ============
         let salesRows = [];
         let salesGroups = [];   // 交易紀錄畫面上依單號分好的組
+        const openSaleOrders = new Set();   // 目前展開的單號
         let salesStaffNames = [];
         const MAX_SALES_ROWS = 500;   // 畫面最多顯示筆數（匯出不受限制）
 
@@ -2547,23 +2552,31 @@
             list.forEach(r => { const k = r.payment_method || '未記錄'; byPay[k] = (byPay[k] || 0) + r.total; });
             document.getElementById('salesByPayment').textContent = Object.entries(byPay).map(([k, v]) => `${k} NT$${v.toLocaleString()}`).join('　｜　');
 
-            // 同一筆結帳（同單號）的品項排在一起：第一列寫時間、員工、付款，多樣商品再加一列合計
+            // 同一筆結帳（同單號）合成一列；買好幾樣的，點一下才展開看每樣商品
             salesGroups = [];
             const byOrder = {};
             list.slice(0, MAX_SALES_ROWS).forEach(r => {
                 const key = r.order_no || `#${r.id}`;
-                if (!byOrder[key]) salesGroups.push(byOrder[key] = []);
+                if (!byOrder[key]) { salesGroups.push(byOrder[key] = []); byOrder[key].key = key; }
                 byOrder[key].push(r);
             });
-            document.querySelector('#salesTable tbody').innerHTML = salesGroups.map((g, gi) =>
-                g.map((r, i) => saleRowHtml(r, i === 0)).join('') + (g.length > 1 ? `
-                <tr class="order-sum">
-                    <td colspan="5" style="text-align:right; color:#868e96;">這筆共 ${g.length} 樣</td>
-                    <td>${g.reduce((s, r) => s + r.quantity, 0)}</td>
-                    <td><b>NT$${g.reduce((s, r) => s + r.total, 0).toLocaleString()}</b></td>
-                    <td></td>
-                    <td><button class="row-btn danger" onclick="deleteSaleOrder(${gi})">🗑️ 整筆</button></td>
-                </tr>` : '')).join('')
+            document.querySelector('#salesTable tbody').innerHTML = salesGroups.map((g, gi) => {
+                if (g.length === 1) return saleRowHtml(g[0]);
+                const r = g[0], open = openSaleOrders.has(g.key);
+                const discount = g.reduce((s, x) => s + (x.discount || 0), 0);
+                return `
+                <tr class="order-first order-head" onclick="toggleSaleOrder(${gi})" title="點一下${open ? '收合' : '展開'}商品">
+                    <td>${twDateTime(r.timestamp)}</td>
+                    <td>${escHtml(r.store)}</td>
+                    <td>${escHtml(r.staff)}</td>
+                    <td>${escHtml(r.customer_name || '')}</td>
+                    <td><span class="order-arrow">${open ? '▾' : '▸'}</span> ${escHtml(r.product_name)} <span class="order-more-count">等 ${g.length} 樣</span></td>
+                    <td>${g.reduce((s, x) => s + x.quantity, 0)}</td>
+                    <td><b>NT$${g.reduce((s, x) => s + x.total, 0).toLocaleString()}</b>${discount ? `<br><small style="color:#e03131">折 ${discount}</small>` : ''}</td>
+                    <td>${escHtml(r.payment_method || '')}${r.tax_id ? `<br><small>統編 ${escHtml(r.tax_id)}</small>` : ''}${invoiceTag(r)}</td>
+                    <td style="white-space: nowrap;"><button class="row-btn danger" onclick="event.stopPropagation(); deleteSaleOrder(${gi})">🗑️ 整筆</button></td>
+                </tr>` + (open ? g.map(x => saleRowHtml(x, false)).join('') : '');
+            }).join('')
                 || '<tr><td colspan="9" style="color:#999">這段期間沒有交易紀錄</td></tr>';
             document.getElementById('salesNote').textContent = list.length > MAX_SALES_ROWS
                 ? `共 ${list.length} 筆，畫面只顯示最新 ${MAX_SALES_ROWS} 筆，請縮小日期範圍；「匯出」會包含全部 ${list.length} 筆。` : '';
@@ -2577,7 +2590,15 @@
             return `<br><small style="color:${voided ? '#adb5bd' : '#2b8a3e'};${voided ? 'text-decoration:line-through;' : ''}">🧾 ${escHtml(r.invoice_no || '')}</small>`;
         }
 
-        // first：這筆結帳的第一樣商品才寫時間、門市、員工、顧客、付款；後面的品項留白
+        // 展開／收合一筆結帳
+        function toggleSaleOrder(gi) {
+            const key = salesGroups[gi]?.key;
+            if (!key) return;
+            openSaleOrders.has(key) ? openSaleOrders.delete(key) : openSaleOrders.add(key);
+            renderSales();
+        }
+
+        // first＝一般的一列；false＝展開後的商品明細（左邊留白，只寫商品）
         function saleRowHtml(r, first = true) {
             return `
                 <tr data-sale="${r.id}" class="${first ? 'order-first' : 'order-more'}">
@@ -2585,7 +2606,7 @@
                     <td>${first ? escHtml(r.store) : ''}</td>
                     <td>${first ? escHtml(r.staff) : ''}</td>
                     <td>${first ? escHtml(r.customer_name || '') : ''}</td>
-                    <td>${escHtml(r.product_name)}</td>
+                    <td>${first ? '' : '<span class="order-indent">└</span> '}${escHtml(r.product_name)}</td>
                     <td>${r.quantity}</td>
                     <td>NT$${r.total.toLocaleString()}${r.discount ? `<br><small style="color:#e03131">折 ${r.discount}</small>` : ''}</td>
                     <td>${first ? `${escHtml(r.payment_method || '')}${r.tax_id ? `<br><small>統編 ${escHtml(r.tax_id)}</small>` : ''}${invoiceTag(r)}` : ''}</td>
