@@ -270,6 +270,32 @@ async function initDb() {
       revoked    BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
+    -- 電子發票（綠界）：一張單（order_no）開一張發票；修改或刪除交易時作廢後重開，所以一張單可能有好幾筆
+    -- status：issued 已開立、failed 開立失敗（後台可補開）、void 已作廢
+    CREATE TABLE IF NOT EXISTS invoices (
+      id             SERIAL PRIMARY KEY,
+      order_no       TEXT NOT NULL,
+      relate_number  TEXT NOT NULL UNIQUE,
+      store          TEXT NOT NULL,
+      kind           TEXT NOT NULL,
+      carrier        TEXT,
+      tax_id         TEXT,
+      amount         INTEGER NOT NULL,
+      status         TEXT NOT NULL,
+      invoice_no     TEXT,
+      invoice_date   TEXT,
+      random_number  TEXT,
+      print_flag     BOOLEAN NOT NULL DEFAULT FALSE,
+      printed_at     TIMESTAMPTZ,
+      error          TEXT,
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      voided_at      TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS invoices_order_no_idx ON invoices (order_no);
+    -- 誰作廢或改開的（前台是當下的銷售員，後台寫「後台」）
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS operator TEXT;
+    -- 補印：列印站下次印的時候要標「補印」
+    ALTER TABLE invoices ADD COLUMN IF NOT EXISTS reprint BOOLEAN NOT NULL DEFAULT FALSE;
   `);
   // 員工名單是空的才放入預設人員（之後在後台管理）
   const { rows: [{ count }] } = await pool.query('SELECT COUNT(*)::int AS count FROM staff');
@@ -342,6 +368,8 @@ const sendPage = (file) => (req, res) => {
 };
 app.get('/', sendPage('pos-checkout.html'));
 app.get('/admin', requireAdmin, sendPage('pos-admin.html'));
+// 列印站：櫃檯電腦一直開著，自動印發票證明聯
+app.get('/print-station', sendPage('pos-print.html'));
 
 // App 設定檔與圖示（加到主畫面用）
 app.get(/^\/(manifest-(pos|admin)\.webmanifest|icon-(pos|admin)-(180|192|512)\.png)$/, (req, res) => {
@@ -684,8 +712,376 @@ function toRecord(r) {
     discount: r.discount || 0,
     payment_method: r.payment_method,
     tax_id: r.tax_id,
+    invoice_id: r.invoice_id || null,
+    invoice_no: r.invoice_no || null,
+    invoice_status: r.invoice_status || null,
+    invoice_kind: r.invoice_kind || null,
+    invoice_carrier: r.invoice_carrier || null,
+    invoice_tax_id: r.invoice_tax_id || null,
+    invoice_voided: r.invoice_voided ? r.invoice_voided.split(',') : [],   // 這張單作廢過的發票號碼
   };
 }
+
+// ============ 電子發票（綠界 B2C） ============
+// 在 Railway Variables 設定 ECPAY_INVOICE_MERCHANT_ID / HASH_KEY / HASH_IV 才會啟用；沒設定時結帳跟以前完全一樣。
+// ECPAY_INVOICE_STAGE=1 用綠界測試環境（不會開出真的發票）
+// INVOICE_DEFAULT_EMAIL / INVOICE_DEFAULT_ADDR：客人沒留資料時填的 Email、地址（綠界規定一定要填）
+const INVOICE = {
+  merchantId: process.env.ECPAY_INVOICE_MERCHANT_ID || '',
+  hashKey: process.env.ECPAY_INVOICE_HASH_KEY || '',
+  hashIv: process.env.ECPAY_INVOICE_HASH_IV || '',
+  stage: process.env.ECPAY_INVOICE_STAGE === '1',
+  email: process.env.INVOICE_DEFAULT_EMAIL || '',
+  addr: process.env.INVOICE_DEFAULT_ADDR || '',
+};
+const invoiceEnabled = () => !!(INVOICE.merchantId && INVOICE.hashKey && INVOICE.hashIv);
+const INVOICE_KINDS = ['paper', 'carrier', 'taxid'];   // 一般（印紙本）、手機條碼、統編
+const CARRIER_RE = /^\/[0-9A-Z.+-]{7}$/;
+
+// 統一編號檢查（財政部規則：加權後各位數相加能被 5 整除；第 7 碼是 7 時有特例）
+function validTaxId(id) {
+  if (!/^\d{8}$/.test(id)) return false;
+  const w = [1, 2, 1, 2, 1, 2, 4, 1];
+  const sum = id.split('').reduce((s, d, i) => { const p = Number(d) * w[i]; return s + Math.floor(p / 10) + (p % 10); }, 0);
+  return sum % 5 === 0 || (id[6] === '7' && (sum + 1) % 5 === 0);
+}
+
+// 綠界加密：JSON → URL encode → AES-128-CBC（PKCS7）→ Base64；解密反過來
+function ecpayEncrypt(obj) {
+  const cipher = crypto.createCipheriv('aes-128-cbc', Buffer.from(INVOICE.hashKey, 'utf8'), Buffer.from(INVOICE.hashIv, 'utf8'));
+  return Buffer.concat([cipher.update(encodeURIComponent(JSON.stringify(obj)), 'utf8'), cipher.final()]).toString('base64');
+}
+function ecpayDecrypt(text) {
+  const decipher = crypto.createDecipheriv('aes-128-cbc', Buffer.from(INVOICE.hashKey, 'utf8'), Buffer.from(INVOICE.hashIv, 'utf8'));
+  const plain = Buffer.concat([decipher.update(Buffer.from(text, 'base64')), decipher.final()]).toString('utf8');
+  return JSON.parse(decodeURIComponent(plain.replace(/\+/g, ' ')));
+}
+
+// 呼叫綠界發票 API，回傳解密後的 Data（裡面的 RtnCode 1 才是成功）
+async function ecpayCall(api, data) {
+  const base = INVOICE.stage ? 'https://einvoice-stage.ecpay.com.tw' : 'https://einvoice.ecpay.com.tw';
+  const res = await fetch(`${base}/B2CInvoice/${api}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      MerchantID: INVOICE.merchantId,
+      RqHeader: { Timestamp: Math.floor(Date.now() / 1000) },
+      Data: ecpayEncrypt({ MerchantID: INVOICE.merchantId, ...data }),
+    }),
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!res.ok) throw new Error(`綠界連線失敗（HTTP ${res.status}）`);
+  const body = await res.json();
+  if (Number(body.TransCode) !== 1) throw new Error(`綠界：${body.TransMsg || '傳輸失敗'}`);
+  return ecpayDecrypt(body.Data);
+}
+
+// 發票品項：每筆銷售一行，金額用折扣後的 total（加總才會等於發票總額）；除不盡時改成 1 組
+function invoiceItems(sales) {
+  return sales.map((s, i) => {
+    const even = s.quantity > 0 && s.total % s.quantity === 0;
+    return {
+      ItemSeq: i + 1,
+      ItemName: (even ? s.product_name : `${s.product_name} ×${s.quantity}`).slice(0, 100),
+      ItemCount: even ? s.quantity : 1,
+      ItemWord: even ? '個' : '組',
+      ItemPrice: even ? s.total / s.quantity : s.total,
+      ItemAmount: s.total,
+    };
+  });
+}
+
+// 開立一張單的發票。relateNumber 是給綠界的唯一編號（同一個編號重試時，先問綠界是不是其實已經開好了）
+async function issueInvoice(orderNo, { kind, carrier, taxId }, relateNumber = orderNo) {
+  const { rows: sales } = await pool.query('SELECT * FROM sales WHERE order_no = $1 ORDER BY id', [orderNo]);
+  if (!sales.length) throw new InputError('找不到這張單的交易');
+  const amount = sales.reduce((s, r) => s + r.total, 0);
+  const store = sales[0].store;
+  if (amount <= 0) return { skipped: true, message: '金額為 0，不用開發票' };
+
+  const { rows: [existing] } = await pool.query('SELECT * FROM invoices WHERE relate_number = $1', [relateNumber]);
+  if (existing && existing.status !== 'failed') return existing;
+
+  const customer = sales[0].customer_id
+    ? (await pool.query('SELECT * FROM customers WHERE id = $1', [sales[0].customer_id])).rows[0] : null;
+  const phone = String(customer?.phone || '').replace(/[^\d]/g, '').slice(0, 20);
+  const print = kind !== 'carrier';
+  const record = async (fields) => {
+    const { rows: [row] } = await pool.query(
+      `INSERT INTO invoices (order_no, relate_number, store, kind, carrier, tax_id, amount, status, invoice_no, invoice_date,
+                             random_number, print_flag, error)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+       ON CONFLICT (relate_number) DO UPDATE SET status = EXCLUDED.status, invoice_no = EXCLUDED.invoice_no,
+         invoice_date = EXCLUDED.invoice_date, random_number = EXCLUDED.random_number, error = EXCLUDED.error,
+         kind = EXCLUDED.kind, carrier = EXCLUDED.carrier, tax_id = EXCLUDED.tax_id, amount = EXCLUDED.amount,
+         print_flag = EXCLUDED.print_flag
+       RETURNING *`,
+      [orderNo, relateNumber, store, kind, kind === 'carrier' ? carrier : null, kind === 'taxid' ? taxId : null, amount,
+       fields.status, fields.invoice_no || null, fields.invoice_date || null, fields.random_number || null, print, fields.error || null]);
+    return row;
+  };
+
+  try {
+    // 之前試過（可能網路斷掉但綠界其實開好了）：先查一次，開好了就直接記下來，避免重複開
+    if (existing) {
+      const found = await ecpayCall('GetIssue', { RelateNumber: relateNumber }).catch(() => null);
+      if (found && Number(found.RtnCode) === 1 && found.IIS_Number) {
+        return await record({ status: 'issued', invoice_no: found.IIS_Number, invoice_date: found.IIS_Create_Date,
+                              random_number: found.IIS_Random_Number });
+      }
+    }
+    const result = await ecpayCall('Issue', {
+      RelateNumber: relateNumber,
+      CustomerID: '',
+      CustomerIdentifier: kind === 'taxid' ? taxId : '',
+      CustomerName: (customer?.name || (kind === 'taxid' ? taxId : '消費者')).slice(0, 60),
+      CustomerAddr: (customer?.address || INVOICE.addr || storeName(store)).slice(0, 100),
+      CustomerPhone: phone,
+      CustomerEmail: phone ? '' : INVOICE.email,
+      ClearanceMark: '',
+      Print: print ? '1' : '0',
+      Donation: '0',
+      LoveCode: '',
+      CarrierType: kind === 'carrier' ? '3' : '',
+      CarrierNum: kind === 'carrier' ? carrier : '',
+      TaxType: '1',
+      SalesAmount: amount,
+      InvoiceRemark: '',
+      InvType: '07',
+      vat: '1',
+      Items: invoiceItems(sales),
+    });
+    if (Number(result.RtnCode) !== 1) return await record({ status: 'failed', error: result.RtnMsg || `錯誤代碼 ${result.RtnCode}` });
+    return await record({ status: 'issued', invoice_no: result.InvoiceNo, invoice_date: result.InvoiceDate,
+                          random_number: result.RandomNumber });
+  } catch (err) {
+    return await record({ status: 'failed', error: err.message });
+  }
+}
+
+// 作廢一張已開立的發票
+async function voidInvoice(inv, reason, operator = '後台') {
+  const result = await ecpayCall('Invalid', {
+    InvoiceNo: inv.invoice_no, InvoiceDate: String(inv.invoice_date).slice(0, 10).replace(/\//g, '-'),
+    Reason: String(reason || '交易修改').slice(0, 20),
+  });
+  if (Number(result.RtnCode) !== 1) throw new Error(result.RtnMsg || `作廢失敗（${result.RtnCode}）`);
+  await pool.query(`UPDATE invoices SET status = 'void', voided_at = NOW(), operator = $2 WHERE id = $1`, [inv.id, operator]);
+}
+
+// 後台修改或刪除交易後：這張單的發票金額對不上了 → 作廢舊的，剩下的品項重開一張（同樣的發票類型）
+// 回傳給後台看的說明文字
+async function resyncInvoice(orderNo) {
+  if (!invoiceEnabled() || !orderNo) return '';
+  const { rows: [inv] } = await pool.query(
+    `SELECT * FROM invoices WHERE order_no = $1 AND status = 'issued' ORDER BY id DESC LIMIT 1`, [orderNo]);
+  if (!inv) return '';
+  try {
+    await voidInvoice(inv, '交易修改');
+  } catch (err) {
+    return `發票 ${inv.invoice_no} 作廢失敗：${err.message}，請到綠界後台處理`;
+  }
+  const { rows: [{ count }] } = await pool.query('SELECT COUNT(*)::int AS count FROM sales WHERE order_no = $1', [orderNo]);
+  if (!count) return `發票 ${inv.invoice_no} 已作廢`;
+  const { rows: [{ n }] } = await pool.query('SELECT COUNT(*)::int AS n FROM invoices WHERE order_no = $1', [orderNo]);
+  const again = await issueInvoice(orderNo, { kind: inv.kind, carrier: inv.carrier, taxId: inv.tax_id }, `${orderNo}R${n}`);
+  if (again.id) await pool.query(`UPDATE invoices SET operator = '後台' WHERE id = $1`, [again.id]);
+  return again.status === 'issued'
+    ? `發票 ${inv.invoice_no} 已作廢，重開新發票 ${again.invoice_no}${again.print_flag ? '（請補印給客人）' : ''}`
+    : `發票 ${inv.invoice_no} 已作廢，但重開失敗：${again.error || ''}，請到發票紀錄補開`;
+}
+
+// 前台：發票功能有沒有開
+app.get('/api/invoice/config', requireDevice, (req, res) => {
+  res.json({ status: 'success', data: { enabled: invoiceEnabled(), stage: INVOICE.stage } });
+});
+
+// 前台：確認手機條碼是真的（綠界向財政部查）；查不到結果時不擋結帳
+app.post('/api/invoice/check-carrier', requireDevice, async (req, res) => {
+  const code = String(req.body?.barcode || '').trim().toUpperCase();
+  if (!CARRIER_RE.test(code)) return res.status(400).json({ status: 'error', message: '手機條碼要是「/」開頭、共 8 碼' });
+  if (!invoiceEnabled()) return res.json({ status: 'success', data: { exists: null } });
+  try {
+    const r = await ecpayCall('CheckBarcode', { BarCode: code });
+    res.json({ status: 'success', data: { exists: Number(r.RtnCode) === 1 ? r.IsExist === 'Y' : null } });
+  } catch (err) {
+    res.json({ status: 'success', data: { exists: null } });
+  }
+});
+
+// 前台：結帳完開發票（交易已經存好；發票開失敗也不影響交易，後台可以補開）
+// ---- 列印站（櫃檯電腦）：要印紙本的發票排隊，列印站每幾秒來拿，印完回報 ----
+// 待印：這家門市、已開立、要印紙本、還沒印過（或按了補印）、兩天內開的（避免很舊的突然被印出來）
+app.get('/api/print/queue', requireDevice, async (req, res) => {
+  const store = req.device ? req.device.store : req.query.store;
+  const { rows } = await pool.query(
+    `SELECT id, invoice_no, amount, kind, tax_id, reprint, created_at FROM invoices
+     WHERE store = $1 AND status = 'issued' AND print_flag AND printed_at IS NULL
+       AND (created_at > NOW() - INTERVAL '2 days' OR reprint)
+     ORDER BY id LIMIT 5`, [store]);
+  res.json({ status: 'success', data: rows });
+});
+
+// 向綠界拿這張發票的證明聯（熱感紙格式），回傳 HTML 給列印站印
+app.get('/api/print/invoice/:id', requireDevice, async (req, res) => {
+  if (!invoiceEnabled()) return res.status(400).json({ status: 'error', message: '發票功能未啟用' });
+  const { rows: [inv] } = await pool.query('SELECT * FROM invoices WHERE id = $1', [toInt(req.params.id, '發票')]);
+  if (!inv || inv.status !== 'issued') return res.status(404).json({ status: 'error', message: '找不到這張發票' });
+  if (req.device && inv.store !== req.device.store) return res.status(403).json({ status: 'error', message: '不是這家門市的發票' });
+  const r = await ecpayCall('InvoicePrint', {
+    InvoiceNo: inv.invoice_no,
+    InvoiceDate: String(inv.invoice_date).slice(0, 10).replace(/\//g, '-'),
+    PrintStyle: 3,                                // 熱感紙
+    IsShowingDetail: 1,                           // 印出品項明細
+    ...(inv.reprint ? { IsReprintInvoice: 'Y' } : {}),
+  });
+  if (Number(r.RtnCode) !== 1 || !r.InvoiceHtml) {
+    return res.status(400).json({ status: 'error', message: `綠界列印失敗：${r.RtnMsg || r.RtnCode}` });
+  }
+  // 綠界給的是一個網址（1 小時內有效）。抓回來加上 <base>，列印站才能直接列印（圖片、樣式照樣從綠界讀）
+  const page = await fetch(r.InvoiceHtml, { signal: AbortSignal.timeout(15000) });
+  if (!page.ok) return res.status(400).json({ status: 'error', message: `綠界列印頁面讀取失敗（HTTP ${page.status}）` });
+  let html = await page.text();
+  const base = `<base href="${String(r.InvoiceHtml).replace(/"/g, '&quot;')}">`;
+  html = /<head[^>]*>/i.test(html) ? html.replace(/<head[^>]*>/i, (m) => `${m}${base}`) : base + html;
+  res.json({ status: 'success', data: { id: inv.id, invoice_no: inv.invoice_no, html } });
+});
+
+// 列印站印完回報
+app.post('/api/print/done', requireDevice, async (req, res) => {
+  const id = toInt(req.body?.id, '發票');
+  const store = req.device ? req.device.store : null;
+  await pool.query(
+    `UPDATE invoices SET printed_at = NOW(), reprint = FALSE WHERE id = $1 ${store ? 'AND store = $2' : ''}`,
+    store ? [id, store] : [id]);
+  res.json({ status: 'success' });
+});
+
+// 前台結帳紀錄：補印（卡紙、沒印到）→ 重新排進列印站，證明聯會標「補印」
+app.post('/api/invoice/reprint', requireDevice, async (req, res) => {
+  const { rows: [inv] } = await pool.query('SELECT * FROM invoices WHERE id = $1', [toInt(req.body?.id, '發票')]);
+  if (!inv || inv.status !== 'issued') return res.status(400).json({ status: 'error', message: '只有已開立的發票可以補印' });
+  if (!inv.print_flag) return res.status(400).json({ status: 'error', message: '這張發票存在手機條碼，不能印紙本' });
+  if (req.device && inv.store !== req.device.store) return res.status(403).json({ status: 'error', message: '不是這家門市的發票' });
+  await pool.query('UPDATE invoices SET printed_at = NULL, reprint = TRUE WHERE id = $1', [inv.id]);
+  res.json({ status: 'success', message: `發票 ${inv.invoice_no} 已送到列印站補印` });
+});
+
+app.post('/api/invoice/issue', requireDevice, async (req, res) => {
+  if (!invoiceEnabled()) return res.status(400).json({ status: 'error', message: '發票功能未啟用' });
+  const orderNo = String(req.body?.order_no || '').slice(0, 40);
+  const kind = INVOICE_KINDS.includes(req.body?.kind) ? req.body.kind : 'paper';
+  const carrier = String(req.body?.carrier || '').trim().toUpperCase();
+  const taxId = String(req.body?.tax_id || '').trim();
+  if (kind === 'carrier' && !CARRIER_RE.test(carrier)) return res.status(400).json({ status: 'error', message: '手機條碼格式錯誤' });
+  if (kind === 'taxid' && !validTaxId(taxId)) return res.status(400).json({ status: 'error', message: '統一編號不正確' });
+  // 只能開自己門市的單
+  const { rows: [sale] } = await pool.query('SELECT store FROM sales WHERE order_no = $1 LIMIT 1', [orderNo]);
+  if (!sale) return res.status(404).json({ status: 'error', message: '找不到這張單' });
+  if (req.device && req.device.store !== sale.store) return res.status(403).json({ status: 'error', message: '不是這家門市的單' });
+  const inv = await issueInvoice(orderNo, { kind, carrier, taxId });
+  res.json({ status: 'success', data: inv });
+});
+
+// 後台：發票紀錄（?from=&to= 依開立日期）
+app.get('/api/admin/invoices', requireAdmin, async (req, res) => {
+  const { sql, params } = dateFilter(req.query);
+  const { rows } = await pool.query(`SELECT * FROM invoices ${sql} ORDER BY created_at DESC LIMIT 2000`, params);
+  res.json({ status: 'success', data: rows, enabled: invoiceEnabled() });
+});
+
+// 後台：補開失敗的發票
+app.post('/api/admin/invoices/retry', requireAdmin, async (req, res) => {
+  if (!invoiceEnabled()) return res.status(400).json({ status: 'error', message: '發票功能未啟用' });
+  const { rows: [inv] } = await pool.query(`SELECT * FROM invoices WHERE id = $1`, [toInt(req.body?.id, '發票')]);
+  if (!inv || inv.status !== 'failed') return res.status(400).json({ status: 'error', message: '只有開立失敗的發票可以補開' });
+  const again = await issueInvoice(inv.order_no, { kind: inv.kind, carrier: inv.carrier, taxId: inv.tax_id }, inv.relate_number);
+  if (again.status !== 'issued') return res.status(400).json({ status: 'error', message: `補開失敗：${again.error || ''}` });
+  res.json({ status: 'success', message: `已補開發票 ${again.invoice_no}`, data: again });
+});
+
+// 改開發票：舊的已開立就先作廢，再用新的類型開一張；operator 記錄是誰處理的（前台是當下的銷售員，後台寫「後台」）
+// 最新那張是開立失敗的，就用同一個編號再試（不會多出一筆失敗紀錄）
+async function reissueOrder(body, operator, store) {
+  const orderNo = String(body?.order_no || '').slice(0, 40);
+  const kind = INVOICE_KINDS.includes(body?.kind) ? body.kind : 'paper';
+  const carrier = String(body?.carrier || '').trim().toUpperCase();
+  const taxId = String(body?.tax_id || '').trim();
+  if (kind === 'carrier' && !CARRIER_RE.test(carrier)) throw new InputError('手機條碼格式錯誤');
+  if (kind === 'taxid' && !validTaxId(taxId)) throw new InputError('統一編號不正確');
+  const { rows: [sale] } = await pool.query('SELECT store FROM sales WHERE order_no = $1 LIMIT 1', [orderNo]);
+  if (!sale) throw new InputError('找不到這張單');
+  if (store && sale.store !== store) throw new InputError('不是這家門市的單');
+
+  const { rows: [last] } = await pool.query('SELECT * FROM invoices WHERE order_no = $1 ORDER BY id DESC LIMIT 1', [orderNo]);
+  let note = '';
+  if (last && last.status === 'issued') {
+    try {
+      await voidInvoice(last, body?.reason || '改開發票', operator);
+    } catch (err) {
+      throw new InputError(`舊發票 ${last.invoice_no} 作廢失敗：${err.message}`);
+    }
+    note = `舊發票 ${last.invoice_no} 已作廢，`;
+  }
+  const { rows: [{ n }] } = await pool.query('SELECT COUNT(*)::int AS n FROM invoices WHERE order_no = $1', [orderNo]);
+  const relate = last && last.status === 'failed' ? last.relate_number : (n ? `${orderNo}R${n}` : orderNo);
+  const inv = await issueInvoice(orderNo, { kind, carrier, taxId }, relate);
+  if (inv.skipped) return { message: `${note}${inv.message}`, data: inv };
+  if (inv.status !== 'issued') throw new InputError(`${note}新發票開立失敗：${inv.error || ''}`);
+  await pool.query('UPDATE invoices SET operator = $1 WHERE id = $2', [operator, inv.id]);
+  // 交易上的統編跟著新發票（改開成統編就填上，改成一般或手機條碼就拿掉），結帳紀錄和報表才會一致
+  await pool.query('UPDATE sales SET tax_id = $1 WHERE order_no = $2', [kind === 'taxid' ? taxId : null, orderNo]);
+  return { message: `${note}新發票 ${inv.invoice_no}`, data: { ...inv, operator } };
+}
+
+// 只作廢、不重開（交易不動）
+async function voidOnly(id, reason, operator, store) {
+  const { rows: [inv] } = await pool.query(`SELECT * FROM invoices WHERE id = $1`, [toInt(id, '發票')]);
+  if (!inv || inv.status !== 'issued') throw new InputError('只有已開立的發票可以作廢');
+  if (store && inv.store !== store) throw new InputError('不是這家門市的發票');
+  try {
+    await voidInvoice(inv, reason, operator);
+  } catch (err) {
+    throw new InputError(`作廢失敗：${err.message}`);
+  }
+  return { message: `發票 ${inv.invoice_no} 已作廢` };
+}
+
+// 前台結帳紀錄：改開／作廢（不用密碼，記錄當下的銷售員；只能處理自己門市的單）
+const frontOperator = (req) => {
+  const name = String(req.body?.staff || '').trim().slice(0, 30);
+  if (!name) throw new InputError('請先選擇銷售員，系統會記錄是誰處理的');
+  return name;
+};
+app.post('/api/invoice/reissue', requireDevice, async (req, res) => {
+  if (!invoiceEnabled()) return res.status(400).json({ status: 'error', message: '發票功能未啟用' });
+  res.json({ status: 'success', ...await reissueOrder(req.body, frontOperator(req), req.device && req.device.store) });
+});
+app.post('/api/invoice/void', requireDevice, async (req, res) => {
+  if (!invoiceEnabled()) return res.status(400).json({ status: 'error', message: '發票功能未啟用' });
+  res.json({ status: 'success', ...await voidOnly(req.body?.id, req.body?.reason, frontOperator(req), req.device && req.device.store) });
+});
+
+// 後台：改開、作廢
+app.post('/api/admin/invoices/reissue', requireAdmin, async (req, res) => {
+  if (!invoiceEnabled()) return res.status(400).json({ status: 'error', message: '發票功能未啟用' });
+  res.json({ status: 'success', ...await reissueOrder(req.body, '後台') });
+});
+app.post('/api/admin/invoices/void', requireAdmin, async (req, res) => {
+  if (!invoiceEnabled()) return res.status(400).json({ status: 'error', message: '發票功能未啟用' });
+  res.json({ status: 'success', ...await voidOnly(req.body?.id, req.body?.reason, '後台') });
+});
+
+// 每筆銷售帶上這張單最新的發票（號碼、狀態）
+const INVOICE_JOIN = `LEFT JOIN LATERAL (
+  SELECT id AS invoice_id, invoice_no, status AS invoice_status, kind AS invoice_kind, carrier AS invoice_carrier,
+         tax_id AS invoice_tax_id
+  FROM invoices WHERE invoices.order_no = sales.order_no ORDER BY id DESC LIMIT 1
+) inv ON TRUE
+LEFT JOIN LATERAL (
+  SELECT string_agg(invoice_no, ',' ORDER BY id) AS invoice_voided
+  FROM invoices WHERE invoices.order_no = sales.order_no AND status = 'void' AND invoice_no IS NOT NULL
+) invv ON TRUE`;
 
 // ============ 顧客 ============
 const cleanText = (v, max) => String(v ?? '').trim().slice(0, max) || null;
@@ -845,7 +1241,7 @@ app.get('/api/pos/sales/today', requireDevice, async (req, res) => {
   const store = req.device ? req.device.store : req.query.store;
   if (!STORE_KEYS[store]) return res.status(400).json({ status: 'error', message: '門市錯誤' });
   const { rows } = await pool.query(
-    `SELECT * FROM sales WHERE ${TODAY_SQL} AND store = $1 ORDER BY created_at DESC LIMIT 500`,
+    `SELECT * FROM sales ${INVOICE_JOIN} WHERE ${TODAY_SQL} AND store = $1 ORDER BY created_at DESC LIMIT 500`,
     [store]);
   res.json({ status: 'success', data: rows.map(toRecord) });
 });
@@ -1133,7 +1529,7 @@ app.get('/api/sales/records', requireAdmin, async (req, res) => {
     sql += `${sql ? ' AND' : 'WHERE'} staff = $${params.length}`;
   }
   const { rows } = await pool.query(
-    `SELECT * FROM sales ${sql} ORDER BY created_at DESC LIMIT 10000`, params);
+    `SELECT * FROM sales ${INVOICE_JOIN} ${sql} ORDER BY created_at DESC LIMIT 10000`, params);
   res.json({ status: 'success', data: rows.map(r => ({ ...toRecord(r), product_id: r.product_id })) });
 });
 
@@ -1225,7 +1621,9 @@ app.post('/api/admin/sales/update', requireAdmin, async (req, res) => {
       [id, newQty, String(staff || '').trim() || null,
        customer_name === undefined ? null : String(customer_name).trim() || '客人', payment, newDiscount]);
     await client.query('COMMIT');
-    res.json({ status: 'success', message: '已修改', data: toRecord(row) });
+    // 數量改了 → 金額變了，這張單的發票要作廢重開
+    const note = newQty !== sale.quantity ? await resyncInvoice(sale.order_no) : '';
+    res.json({ status: 'success', message: note ? `已修改；${note}` : '已修改', data: toRecord(row) });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     throw err;
@@ -1253,7 +1651,14 @@ app.post('/api/admin/sales/delete', requireAdmin, async (req, res) => {
       }
     }
     await client.query('COMMIT');
-    res.json({ status: 'success', message: `已刪除 ${rows.length} 筆，庫存已加回`, data: { deleted: rows.length } });
+    // 刪掉的品項所在的單，發票作廢；單裡還有剩的品項就重開一張
+    const notes = [];
+    for (const orderNo of new Set(rows.map(r => r.order_no).filter(Boolean))) {
+      const note = await resyncInvoice(orderNo);
+      if (note) notes.push(note);
+    }
+    res.json({ status: 'success', message: `已刪除 ${rows.length} 筆，庫存已加回${notes.length ? '\n' + notes.join('\n') : ''}`,
+               data: { deleted: rows.length } });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     throw err;
