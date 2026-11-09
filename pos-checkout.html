@@ -3345,7 +3345,7 @@
                     let o = r.order_no && orders.find(o => o.no === r.order_no);
                     if (!o) orders.push(o = { no: r.order_no, time: r.timestamp, staff: r.staff, customer: r.customer_name, payment: r.payment_method, taxId: r.tax_id,
                                               invoiceId: r.invoice_id, invoiceNo: r.invoice_no, invoiceStatus: r.invoice_status,
-                                              invoiceKind: r.invoice_kind, invoiceCarrier: r.invoice_carrier, invoiceTaxId: r.invoice_tax_id,
+                                              invoiceKind: r.invoice_kind, invoiceCarrier: r.invoice_carrier, invoiceTaxId: r.invoice_tax_id, invoiceVoidReason: r.invoice_void_reason,
                                               invoiceVoided: r.invoice_voided || [], lines: [], total: 0 });
                     o.lines.push(r);
                     o.total += r.total;
@@ -3378,7 +3378,7 @@
                         <div class="order-total"><span>合計</span><span>NT$${o.total.toLocaleString()}</span></div>
                         ${invoiceOn && o.no ? `<div class="order-line order-invoice" style="color:${o.invoiceStatus === 'issued' ? '#2b8a3e' : o.invoiceStatus ? '#e03131' : '#999'}">
                             <span>${o.invoiceStatus === 'issued' ? `🧾 發票 ${esc(o.invoiceNo)}<small class="order-inv-kind">${esc(invoiceKindText(o))}</small>`
-                                : o.invoiceStatus === 'void' ? `🧾 發票 ${esc(o.invoiceNo || '')} 已作廢`
+                                : o.invoiceStatus === 'void' ? `🧾 發票 ${esc(o.invoiceNo || '')} 已作廢${o.invoiceVoidReason ? `<small class="order-inv-kind">原因：${esc(o.invoiceVoidReason)}</small>` : ''}`
                                 : o.invoiceStatus === 'failed' ? '⚠️ 發票開立失敗' : '🧾 沒有開發票'}</span>
                             <span class="order-inv-btns">${o.invoiceStatus === 'issued'
                                 ? `${o.invoiceKind !== 'carrier' ? `<button onclick="reprintInvoice(${o.invoiceId}, '${esc(o.invoiceNo)}')">補印</button>` : ''}

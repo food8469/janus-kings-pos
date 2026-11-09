@@ -941,7 +941,7 @@
                     <td><b>${escHtml(i.invoice_no || '－')}</b>${i.random_number ? `<br><small>隨機碼 ${escHtml(i.random_number)}</small>` : ''}</td>
                     <td>${INV_KIND_NAMES[i.kind] || i.kind}${detail}</td>
                     <td>${ntd(i.amount)}</td>
-                    <td style="color:${color}; font-weight:bold;">${label}${i.error ? `<br><small style="font-weight:normal">${escHtml(i.error)}</small>` : ''}</td>
+                    <td style="color:${color}; font-weight:bold;">${label}${i.error ? `<br><small style="font-weight:normal">${escHtml(i.error)}</small>` : ''}${i.status === 'void' && i.void_reason ? `<br><small style="font-weight:normal">原因：${escHtml(i.void_reason)}</small>` : ''}</td>
                     <td>${i.operator ? `${escHtml(i.operator)} ${i.status === 'void' ? '作廢' : '改開'}` : ''}</td>
                     <td>${i.status === 'failed' ? `<button onclick="retryInvoice(${i.id})">補開</button>` : ''}
                         ${i.status === 'issued' ? `<button class="secondary" onclick="voidInvoice(${i.id}, '${escHtml(i.invoice_no)}')">作廢</button>` : ''}</td>
