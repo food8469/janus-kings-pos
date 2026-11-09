@@ -932,7 +932,7 @@ app.get('/api/print/invoice/:id', requireDevice, async (req, res) => {
     InvoiceNo: inv.invoice_no,
     InvoiceDate: String(inv.invoice_date).slice(0, 10).replace(/\//g, '-'),
     PrintStyle: 3,                                // 熱感紙
-    IsShowingDetail: 1,                           // 印出品項明細
+    IsShowingDetail: inv.kind === 'taxid' ? 1 : 2,   // 打統編的才印品項明細（法規要附），一般客人不印、省紙
     ...(inv.reprint ? { IsReprintInvoice: 'Y' } : {}),
   });
   if (Number(r.RtnCode) !== 1 || !r.InvoiceHtml) {
